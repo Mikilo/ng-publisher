@@ -35,7 +35,7 @@ Unity publisher portal integrated into Unity Editor.
 ```
 {
   "dependencies": {
-    "com.mikilo.ng-unity-versioner": "https://github.com/Mikilo/ng-publisher.git"
+    "com.mikilo.ng-publisher": "https://github.com/Mikilo/ng-publisher.git"
   }
 }
 ```
