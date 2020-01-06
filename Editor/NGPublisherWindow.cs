@@ -4,11 +4,11 @@ using System.Collections.Generic;
 using System.Net;
 using System.Text;
 using UnityEditor;
-using UnityEngine;
 
 namespace NGPublisher
 {
 	using NGToolsStandalone_For_NGPublisherEditor;
+	using UnityEngine;
 
 	[PrewarmEditorWindow]
 	public class NGPublisherWindow : NGEditorWindow, IHasCustomMenu
@@ -342,7 +342,7 @@ namespace NGPublisher
 
 		public const string	Title = "NG Publisher";
 		public const string	LastDatabasePathKeyPref = NGPublisherWindow.Title + "_LastDatabasePath";
-		public const string	Path = "Assets/Plugins/NGTools/NGPublisher/Editor/database.asset";
+		public const string	Path = "Assets/PublisherDatabase.asset";
 		public const string	UnsupportedImageDescription = "This image is not supported. Use the version below.";
 		public const int	IconImageWidthRequired = 160;
 		public const int	IconImageHeightRequired = 160;
@@ -396,7 +396,7 @@ namespace NGPublisher
 		private PublisherAPI		publisherAPI;
 		private Vector2				versionScrollPosition;
 		private Vector2				versionLanguageScrollPosition;
-		private string				databasePath;
+		private string				databasePath = string.Empty;
 
 		private Statuses			displayStatus = Statuses.All;
 		private VerticalScrollbar	packagesScrollbar;
@@ -444,6 +444,9 @@ namespace NGPublisher
 				catch (UnityException ex)
 				{
 					Debug.LogException(ex);
+
+					if (this.database != null)
+						Object.DestroyImmediate(this.database);
 					this.database = null;
 				}
 			}
