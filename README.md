@@ -3,16 +3,21 @@ Unity publisher portal integrated into Unity Editor.
 
 
 <b>Main page</b> of window <b>NG Publisher</b>
-![Preview](https://forum.unity.com/attachments/upload_2020-1-6_8-0-52-png.539145/)
+
+![Main page](https://forum.unity.com/attachments/upload_2020-1-6_8-0-52-png.539145/)
+
 
 <b>Version:</b>
-![Preview](https://forum.unity.com/attachments/upload_2020-1-6_8-2-15-png.539151/)
+
+![Version](https://forum.unity.com/attachments/upload_2020-1-6_8-2-15-png.539151/)
 
 <b>Language:</b>
-![Preview](https://forum.unity.com/attachments/upload_2020-1-6_8-3-13-png.539154/)
+
+![Language](https://forum.unity.com/attachments/upload_2020-1-6_8-3-13-png.539154/)
 
 <b>Key Images:</b>
-![Preview](https://forum.unity.com/attachments/upload_2020-1-6_8-3-40-png.539157/)
+
+![Key images](https://forum.unity.com/attachments/upload_2020-1-6_8-3-40-png.539157/)
 
 
 # How to install:
