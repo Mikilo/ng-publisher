@@ -9,6 +9,7 @@ namespace NGPublisher
 	{
 		[SerializeField]
 		private bool		hasPackages;
+		public bool			HasPackages { get { return this.hasPackages; } }
 		[SerializeField]
 		private Package[]	packages;
 		public Package[]	Packages
@@ -29,6 +30,7 @@ namespace NGPublisher
 
 		[SerializeField]
 		private bool		hasLanguages;
+		public bool			HasLanguages { get { return this.hasLanguages; } }
 		[SerializeField]
 		private Language[]	languages;
 		public Language[]	Languages
@@ -46,6 +48,7 @@ namespace NGPublisher
 
 		[SerializeField]
 		private bool	hasVets;
+		public bool		HasVets { get { return this.hasVets; } }
 		[SerializeField]
 		private Vets	vets;
 		public Vets		Vets
