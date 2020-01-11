@@ -51,5 +51,23 @@ namespace NGPublisher
 
 		bool	IsSettingPackage(int versionId);
 		void	SetPackage(int versionId, string versionName, string publishnotes, int categoryID, float price, Action<HttpWebResponse, string> onCompleted);
+
+		bool	IsGettingVoucherPackages(int publisherId);
+		void	GetVoucherPackages(int publisherId, Action<HttpWebResponse, string> onCompleted);
+
+		bool	IsGettingVouchers(int publisherId);
+		void	GetVouchers(int publisherId, Action<HttpWebResponse, string> onCompleted);
+
+		bool	IsCreatingVoucher(int publisherId, int packageId);
+		void	CreateVoucher(int publisherId, int packageId, Action<HttpWebResponse, string> onCompleted);
+
+		bool	IsGettingPeriods(int publisherId);
+		void	GetPeriods(int publisherId, Action<HttpWebResponse, string> onCompleted);
+
+		bool	IsGettingSaleCounts(int publisherId, int periodId);
+		void	GetSaleCounts(int publisherId, int periodId, Action<HttpWebResponse, string> onCompleted);
+
+		bool	IsGettingFreeDownloads(int publisherId, int periodId);
+		void	GetFreeDownloads(int publisherId, int periodId, Action<HttpWebResponse, string> onCompleted);
 	}
 }

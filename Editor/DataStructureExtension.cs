@@ -27,6 +27,38 @@ namespace NGPublisher
 		}
 
 		[Serializable]
+		private class VoucherPackagesContainer
+		{
+			public string[]	aaData;
+		}
+
+		[Serializable]
+		private class VouchersContainer
+		{
+			public string[]	aaData;
+		}
+
+		[Serializable]
+		private class FreeDownloadsContainer
+		{
+			public string[]	aaData;
+			public Result[]	result;
+		}
+
+		[Serializable]
+		private class SaleCountsContainer
+		{
+			public string[]	aaData;
+			public Result[]	result;
+		}
+
+		[Serializable]
+		private class PeriodsContainer
+		{
+			public Period[]	periods;
+		}
+
+		[Serializable]
 		private class CategoriesContainer
 		{
 			public Category[]	categories;
@@ -51,9 +83,6 @@ namespace NGPublisher
 					result = null
 				};
 
-				if (Conf.DebugMode == Conf.DebugState.Verbose)
-					Debug.Log(result);
-
 				if (DataStructureExtension.CheckRequest(r, result, requestResponse) == true)
 				{
 					Response	response = DataStructureExtension.CheckResponse(result, requestResponse);
@@ -61,7 +90,7 @@ namespace NGPublisher
 					if (Conf.DebugMode == Conf.DebugState.Verbose)
 						InternalNGDebug.Snapshot(response);
 
-					if (response == null || response.status == "ok")
+					if (response == null || response.Succeeded == true)
 					{
 						Packages		packagesContainer = JsonUtility.FromJson<Packages>(result);
 						List<Package>	packages = new List<Package>(packagesContainer.packages);
@@ -78,7 +107,7 @@ namespace NGPublisher
 					onCompleted(requestResponse);
 			});
 		}
-		
+
 		public static void	RequestLanguages(this PublisherDatabase database, IPublisherAPI api, Action<RequestResponse<Language[]>> onCompleted = null)
 		{
 			api.GetLanguages((r, result) =>
@@ -96,7 +125,7 @@ namespace NGPublisher
 					LanguagesContainer	languages = JsonUtility.FromJson<LanguagesContainer>("{\"languages\":" + result + '}');
 
 					if (Conf.DebugMode == Conf.DebugState.Verbose)
-						Debug.Log(result);
+						InternalNGDebug.Snapshot(languages.languages);
 
 					requestResponse.ok = true;
 					requestResponse.result = languages.languages;
@@ -107,7 +136,7 @@ namespace NGPublisher
 					onCompleted(requestResponse);
 			});
 		}
-		
+
 		public static void	RequestVettingConfig(this PublisherDatabase database, IPublisherAPI api, Action<RequestResponse<Vets>> onCompleted = null)
 		{
 			api.GetVettingConfig((r, result) =>
@@ -122,12 +151,262 @@ namespace NGPublisher
 
 				if (DataStructureExtension.CheckRequest(r, result, requestResponse) == true)
 				{
-					if (Conf.DebugMode == Conf.DebugState.Verbose)
-						Debug.Log(result);
-
 					requestResponse.ok = true;
 					requestResponse.result = JsonUtility.FromJson<Vets>(result);
 					database.Vets = requestResponse.result;
+				}
+
+				if (onCompleted != null)
+					onCompleted(requestResponse);
+			});
+		}
+
+		public static void	RequestVoucherPackages(this PublisherDatabase database, IPublisherAPI api, Action<RequestResponse<VoucherPackage[]>> onCompleted = null)
+		{
+			api.GetVoucherPackages(api.Session.publisher, (r, result) =>
+			{
+				RequestResponse<VoucherPackage[]>	requestResponse = new RequestResponse<VoucherPackage[]>()
+				{
+					context = database,
+					ok = false,
+					error = null,
+					result = null
+				};
+
+				if (DataStructureExtension.CheckRequest(r, result, requestResponse) == true)
+				{
+					VoucherPackagesContainer	container = JsonUtility.FromJson<VoucherPackagesContainer>(result.Replace("],[", ",").Replace("[[", "[").Replace("]]", "]"));
+
+					if (Conf.DebugMode == Conf.DebugState.Verbose)
+						InternalNGDebug.Snapshot(container);
+
+					VoucherPackage[]	packages = new VoucherPackage[container.aaData.Length >> 1];
+
+					for (int i = 0, max = container.aaData.Length; i < max; i += 2)
+					{
+						packages[i >> 1] = new VoucherPackage()
+						{
+							packageId = int.Parse(container.aaData[i]),
+							packageName = container.aaData[i + 1],
+						};
+					}
+
+					requestResponse.ok = true;
+					requestResponse.result = packages;
+					database.VoucherPackages = requestResponse.result;
+				}
+
+				if (onCompleted != null)
+					onCompleted(requestResponse);
+			});
+		}
+
+		public static void	RequestVouchers(this PublisherDatabase database, IPublisherAPI api, Action<RequestResponse<Voucher[]>> onCompleted = null)
+		{
+			api.GetVouchers(api.Session.publisher, (r, result) =>
+			{
+				RequestResponse<Voucher[]>	requestResponse = new RequestResponse<Voucher[]>()
+				{
+					context = database,
+					ok = false,
+					error = null,
+					result = null
+				};
+
+				if (DataStructureExtension.CheckRequest(r, result, requestResponse) == true)
+				{
+					VouchersContainer	container = JsonUtility.FromJson<VouchersContainer>(result.Replace("],[", ",").Replace("[[", "[").Replace("]]", "]"));
+
+					if (Conf.DebugMode == Conf.DebugState.Verbose)
+						InternalNGDebug.Snapshot(container);
+
+					Voucher[]	vouchers = new Voucher[container.aaData.Length / 6];
+
+					for (int i = 0, j = 0, max = container.aaData.Length; i < max; i += 6, ++j)
+					{
+						vouchers[j] = new Voucher()
+						{
+							voucherCode = container.aaData[i + 0],
+							package = container.aaData[i + 1],
+							issuedBy = container.aaData[i + 2],
+							issuedDate = container.aaData[i + 3],
+							invoice = container.aaData[i + 4],
+							redeemedDate = container.aaData[i + 5]
+						};
+					}
+
+					requestResponse.ok = true;
+					requestResponse.result = vouchers;
+					database.Vouchers = requestResponse.result;
+				}
+
+				if (onCompleted != null)
+					onCompleted(requestResponse);
+			});
+		}
+
+		public static void	CreateVoucher(this PublisherDatabase database, IPublisherAPI api, Package package, Action<RequestResponse<Voucher>> onCompleted = null)
+		{
+			api.CreateVoucher(api.Session.publisher, package.id, (r, result) =>
+			{
+				RequestResponse<Voucher>	requestResponse = new RequestResponse<Voucher>()
+				{
+					context = package,
+					ok = false,
+					error = null,
+					result = null
+				};
+
+				if (DataStructureExtension.CheckRequest(r, result, requestResponse) == true)
+				{
+					Response	response = DataStructureExtension.CheckResponse(result, requestResponse);
+
+					if (Conf.DebugMode == Conf.DebugState.Verbose)
+						InternalNGDebug.Snapshot(response);
+
+						InternalNGDebug.Snapshot(response.errors);
+
+					if (response != null && response.Succeeded == true)
+					{
+						Voucher	voucher = new Voucher()
+						{
+							voucherCode = response.voucher_code,
+							package = package.name,
+							issuedBy = api.Session.name,
+							issuedDate = DateTime.Now.ToString("yyyy-MM-dd"),
+							invoice = string.Empty,
+							redeemedDate = string.Empty
+						};
+
+						requestResponse.ok = true;
+						requestResponse.result = voucher;
+
+						Voucher[]	array = database.Vouchers;
+						Array.Resize(ref array, database.Vouchers.Length + 1);
+						array[array.Length - 1] = voucher;
+
+						database.Vouchers = array;
+					}
+				}
+
+				if (onCompleted != null)
+					onCompleted(requestResponse);
+			});
+		}
+
+		public static void	RequestPeriods(this PublisherDatabase database, IPublisherAPI api, Action<RequestResponse<Period[]>> onCompleted = null)
+		{
+			api.GetPeriods(api.Session.publisher, (r, result) =>
+			{
+				RequestResponse<Period[]>	requestResponse = new RequestResponse<Period[]>()
+				{
+					context = database,
+					ok = false,
+					error = null,
+					result = null
+				};
+
+				if (DataStructureExtension.CheckRequest(r, result, requestResponse) == true)
+				{
+					PeriodsContainer	container = JsonUtility.FromJson<PeriodsContainer>(result);
+
+					if (Conf.DebugMode == Conf.DebugState.Verbose)
+						InternalNGDebug.Snapshot(container);
+
+					requestResponse.ok = true;
+					requestResponse.result = container.periods;
+					database.Periods = requestResponse.result;
+				}
+
+				if (onCompleted != null)
+					onCompleted(requestResponse);
+			});
+		}
+
+		public static void	RequestSaleCounts(this PublisherDatabase database, IPublisherAPI api, Period period, Action<RequestResponse<Sale[]>> onCompleted = null)
+		{
+			api.GetSaleCounts(api.Session.publisher, period.value, (r, result) =>
+			{
+				RequestResponse<Sale[]>	requestResponse = new RequestResponse<Sale[]>()
+				{
+					context = period.value,
+					ok = false,
+					error = null,
+					result = null
+				};
+
+				if (DataStructureExtension.CheckRequest(r, result, requestResponse) == true)
+				{
+					SaleCountsContainer	container = JsonUtility.FromJson<SaleCountsContainer>(result.Replace("],[", ",").Replace("[[", "[").Replace("]]", "]"));
+
+					if (Conf.DebugMode == Conf.DebugState.Verbose)
+						InternalNGDebug.Snapshot(container);
+
+					Sale[]	sales = new Sale[container.aaData.Length / 8];
+
+					for (int i = 0, j = 0, max = container.aaData.Length; i < max; i += 8, ++j)
+					{
+						sales[j] = new Sale()
+						{
+							asset = container.aaData[i + 0],
+							price = container.aaData[i + 1],
+							quantity = int.Parse(container.aaData[i + 2]),
+							refunds = int.Parse(container.aaData[i + 3]),
+							chargebacks = int.Parse(container.aaData[i + 4]),
+							gross = container.aaData[i + 5],
+							first = container.aaData[i + 6],
+							last = container.aaData[i + 7],
+							net = container.result[j].net,
+							short_url = container.result[j].short_url,
+						};
+					}
+
+					requestResponse.ok = true;
+					requestResponse.result = sales;
+					period.Sales = sales;
+				}
+
+				if (onCompleted != null)
+					onCompleted(requestResponse);
+			});
+		}
+
+		public static void	RequestFreeDownloads(this PublisherDatabase database, IPublisherAPI api, Period period, Action<RequestResponse<Download[]>> onCompleted = null)
+		{
+			api.GetFreeDownloads(api.Session.publisher, period.value, (r, result) =>
+			{
+				RequestResponse<Download[]>	requestResponse = new RequestResponse<Download[]>()
+				{
+					context = period.value,
+					ok = false,
+					error = null,
+					result = null
+				};
+
+				if (DataStructureExtension.CheckRequest(r, result, requestResponse) == true)
+				{
+					FreeDownloadsContainer	container = JsonUtility.FromJson<FreeDownloadsContainer>(result.Replace("],[", ",").Replace("[[", "[").Replace("]]", "]"));
+
+					if (Conf.DebugMode == Conf.DebugState.Verbose)
+						InternalNGDebug.Snapshot(container);
+
+					Download[]	downloads = new Download[container.aaData.Length / 4];
+
+					for (int i = 0, j = 0, max = container.aaData.Length; i < max; i += 4, ++j)
+					{
+						downloads[j] = new Download()
+						{
+							asset = container.aaData[i + 0],
+							quantity = int.Parse(container.aaData[i + 1]),
+							first = container.aaData[i + 2],
+							last = container.aaData[i + 3],
+							short_url = container.result[j].short_url,
+						};
+					}
+
+					requestResponse.ok = true;
+					requestResponse.result = downloads;
+					period.Downloads = downloads;
 				}
 
 				if (onCompleted != null)
@@ -152,7 +431,7 @@ namespace NGPublisher
 					PackageRatings	packageRatings = JsonUtility.FromJson<PackageRatings>(result.Substring("[{\"data\":".Length - 2, result.Length - "[{\"data\":".Length - 1));
 
 					if (Conf.DebugMode == Conf.DebugState.Verbose)
-						Debug.Log(result);
+						InternalNGDebug.Snapshot(packageRatings.rating);
 
 					requestResponse.ok = true;
 					requestResponse.result = packageRatings.rating;
@@ -183,7 +462,7 @@ namespace NGPublisher
 					CategoriesContainer	categories = JsonUtility.FromJson<CategoriesContainer>("{\"categories\":" + result + "}");
 
 					if (Conf.DebugMode == Conf.DebugState.Verbose)
-						Debug.Log(result);
+						InternalNGDebug.Snapshot(categories.categories);
 
 					requestResponse.ok = true;
 					requestResponse.result = categories.categories;
@@ -216,7 +495,7 @@ namespace NGPublisher
 
 					if (response != null)
 					{
-						if (response.status == "ok")
+						if (response.Succeeded == true)
 						{
 							Package	package = version.package;
 							Version	model = null;
@@ -233,6 +512,7 @@ namespace NGPublisher
 							string	modelJson = JsonUtility.ToJson(model);
 
 							model = new Version();
+							model.package = package;
 
 							JsonUtility.FromJsonOverwrite(modelJson, model);
 
@@ -280,7 +560,7 @@ namespace NGPublisher
 					if (Conf.DebugMode == Conf.DebugState.Verbose)
 						InternalNGDebug.Snapshot(response);
 
-					if (response != null && response.status == "ok")
+					if (response != null && response.Succeeded == true)
 					{
 						Package			package = version.package;
 						List<Version>	list = new List<Version>(package.versions);
@@ -330,7 +610,7 @@ namespace NGPublisher
 					if (Conf.DebugMode == Conf.DebugState.Verbose)
 						InternalNGDebug.Snapshot(response);
 
-					if (response != null && response.status == "ok")
+					if (response != null && response.Succeeded == true)
 					{
 						requestResponse.ok = true;
 						requestResponse.result = true;
@@ -439,7 +719,7 @@ namespace NGPublisher
 					if (Conf.DebugMode == Conf.DebugState.Verbose)
 						InternalNGDebug.Snapshot(response);
 
-					if (response != null && response.status == "ok")
+					if (response != null && response.Succeeded == true)
 					{
 						requestResponse.ok = true;
 						requestResponse.result = true;
@@ -476,7 +756,7 @@ namespace NGPublisher
 					if (Conf.DebugMode == Conf.DebugState.Verbose)
 						InternalNGDebug.Snapshot(response);
 
-					if (response != null && response.status == "ok")
+					if (response != null && response.Succeeded == true)
 					{
 						requestResponse.ok = true;
 						requestResponse.result = true;
@@ -507,7 +787,7 @@ namespace NGPublisher
 					if (Conf.DebugMode == Conf.DebugState.Verbose)
 						InternalNGDebug.Snapshot(response);
 
-					if (response != null && response.status == "ok")
+					if (response != null && response.Succeeded == true)
 					{
 						var unityPackages = new List<VersionDetailed.Package.Version.UnityPackage>(version.detailed.package.version.unitypackages);
 
@@ -548,7 +828,7 @@ namespace NGPublisher
 					if (Conf.DebugMode == Conf.DebugState.Verbose)
 						InternalNGDebug.Snapshot(response);
 
-					if (response != null && response.status == "ok")
+					if (response != null && response.Succeeded == true)
 					{
 						requestResponse.ok = true;
 						requestResponse.result = true;
@@ -580,7 +860,7 @@ namespace NGPublisher
 					if (Conf.DebugMode == Conf.DebugState.Verbose)
 						InternalNGDebug.Snapshot(response);
 
-					if (response != null && response.status == "ok")
+					if (response != null && response.Succeeded == true)
 					{
 						requestResponse.ok = true;
 						requestResponse.result = response.url;
@@ -700,7 +980,7 @@ namespace NGPublisher
 
 		private static Response	CheckResponse<T>(string result, RequestResponse<T> requestResponse)
 		{
-			if (result[0] == '{') // Let's consider it is JSON and try to get a response if available.
+			if (result[0] == '{' && (result.StartsWith("{\"status\":") == true || result.StartsWith("{\"success\":") == true || result.Contains("\"errors\":{") == true)) // Let's consider it is JSON and try to get a response if available.
 			{
 				result = Response.MergeErrors(result);
 
@@ -708,16 +988,14 @@ namespace NGPublisher
 				{
 					Response	response = JsonUtility.FromJson<Response>(result);
 
-					if (response.status == "error")
-					{
-						if (Conf.DebugMode == Conf.DebugState.Verbose)
-							Debug.LogError(result);
+					if (response.Succeeded == true)
+						return response;
 
-						requestResponse.error = response.errors.error.Replace("<br>", "\n");
-						return response;
-					}
-					else if (response.status == "ok")
-						return response;
+					if (Conf.DebugMode == Conf.DebugState.Verbose)
+						Debug.LogError(result);
+
+					requestResponse.error = response.errors.error.Replace("<br>", "\n");
+					return response;
 				}
 				catch (Exception ex)
 				{
