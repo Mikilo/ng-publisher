@@ -1,5 +1,6 @@
 ﻿using NGToolsStandalone_For_NGPublisher;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Net;
 using System.Text;
@@ -332,6 +333,12 @@ namespace NGPublisher
 			}
 		}
 
+		public enum MainTab
+		{
+			Packages,
+			Sales
+		}
+
 		public enum LanguageTab
 		{
 			KeyImages,
@@ -342,6 +349,7 @@ namespace NGPublisher
 
 		public const string	Title = "NG Publisher";
 		public const string	LastDatabasePathKeyPref = NGPublisherWindow.Title + "_LastDatabasePath";
+		public const string	PackagesScrollbarOffsetKeyPref = NGPublisherWindow.Title + "_PackagesScrollbarOffset";
 		public const string	Path = "Assets/PublisherDatabase.asset";
 		public const string	UnsupportedImageDescription = "This image is not supported. Use the version below.";
 		public const int	IconImageWidthRequired = 160;
@@ -405,6 +413,7 @@ namespace NGPublisher
 		public int			selectedPackage;
 		public int			selectedVersion;
 		public string		selectedLanguage;
+		public MainTab		mainTab;
 		public LanguageTab	languageTab;
 
 		[NonSerialized]
@@ -432,6 +441,23 @@ namespace NGPublisher
 
 		private bool		displayPublishNotes;
 
+		private bool				editExport = false;
+		[NonSerialized]
+		private string				exportLabel;
+		[NonSerialized]
+		private string[]			assetsAsLabel;
+		private IPackageExporter[]	exporters;
+		[NonSerialized]
+		private string[]			exportersAsLabel;
+		private int					selectedAssetForExport = -1;
+		private int					selectedExporter;
+		private int					selectedPeriodForExport = -1;
+
+		private int				selectedPeriod;
+		private bool			displaySales = true;
+		private bool			displayDownloads = true;
+		private QueueRoutine	exportRoutine;
+
 		private ErrorPopup		errorPopup = new ErrorPopup(NGPublisherWindow.Title, "An error occurred. Try to reopen " + NGPublisherWindow.Title + ".");
 		private MessageCenter	messageCenter = new MessageCenter();
 
@@ -450,6 +476,12 @@ namespace NGPublisher
 
 			this.storeAPI = new AssetStoreAPI();
 			this.publisherAPI = new PublisherAPI(this.lastSession);
+			this.exporters = Utility.CreateAllInstancesOf<IPackageExporter>();
+			this.exportersAsLabel = new string[this.exporters.Length];
+			for (int i = 0, max = this.exportersAsLabel.Length; i < max; ++i)
+				this.exportersAsLabel[i] = this.exporters[i].Name;
+
+			this.selectedExporter = Mathf.Clamp(this.selectedExporter, 0, this.exporters.Length - 1);
 
 			string	path = NGEditorPrefs.GetString(NGPublisherWindow.LastDatabasePathKeyPref, NGPublisherWindow.Path, true);
 
@@ -481,6 +513,9 @@ namespace NGPublisher
 		protected virtual void	OnDisable()
 		{
 			Utility.UnregisterWindow(this);
+
+			if (this.packagesScrollbar != null)
+				NGEditorPrefs.SetFloat(NGPublisherWindow.PackagesScrollbarOffsetKeyPref, this.packagesScrollbar.Offset, true);
 
 			if (this.database != null)
 				NGEditorPrefs.SetString(NGPublisherWindow.LastDatabasePathKeyPref, AssetDatabase.GetAssetPath(this.database), true);
@@ -549,6 +584,15 @@ namespace NGPublisher
 				if (this.database.HasVets == false && this.publisherAPI.IsGettingVettingConfig() == false)
 					this.database.RequestVettingConfig(this.publisherAPI, this.HandleErrorOnly);
 
+				if (this.database.HasVoucherPackages == false && this.publisherAPI.IsGettingVoucherPackages(this.publisherAPI.Session.publisher) == false)
+					this.database.RequestVoucherPackages(this.publisherAPI, this.HandleErrorOnly);
+
+				if (this.database.HasVouchers == false && this.publisherAPI.IsGettingVouchers(this.publisherAPI.Session.publisher) == false)
+					this.database.RequestVouchers(this.publisherAPI, this.HandleErrorOnly);
+
+				if (this.database.HasPeriods == false && this.publisherAPI.IsGettingPeriods(this.publisherAPI.Session.publisher) == false)
+					this.database.RequestPeriods(this.publisherAPI, this.HandleErrorOnly);
+
 				using (new EditorGUILayout.HorizontalScope())
 				{
 					Utility.content.text = this.publisherAPI.Session.name + " (" + this.publisherAPI.Session.publisher + ")";
@@ -556,6 +600,18 @@ namespace NGPublisher
 					GUILayout.Label(Utility.content, GeneralStyles.Title1);
 
 					GUILayout.FlexibleSpace();
+
+					if (GUILayout.Button("Packages") == true)
+					{
+						this.mainTab = MainTab.Packages;
+						return;
+					}
+
+					if (GUILayout.Button("Sales") == true)
+					{
+						this.mainTab = MainTab.Sales;
+						return;
+					}
 
 					using (new EditorGUI.DisabledScope(isGettingPackages))
 					{
@@ -594,231 +650,10 @@ namespace NGPublisher
 					return;
 				}
 
-				this.selectedPackage = Mathf.Clamp(this.selectedPackage, 0, this.database.Packages.Length - 1);
-
-				if (this.selectedPackage < 0 || this.selectedPackage >= this.database.Packages.Length)
-					return;
-
-				Package	package = this.database.Packages[this.selectedPackage];
-				Version	version = null;
-				VersionDetailed.Package.Version.Language	language = null;
-
-				if (this.selectedVersion != -1)
-				{
-					this.selectedVersion = Mathf.Clamp(this.selectedVersion, 0, package.versions.Length - 1);
-
-					if (this.selectedVersion >= 0 && this.selectedVersion < package.versions.Length)
-					{
-						version = package.versions[this.selectedVersion];
-
-						if (this.selectedLanguage != null)
-						{
-							if (version.detailed != null)
-								language = version.detailed.package.version[this.selectedLanguage];
-						}
-					}
-				}
-
-				using (new EditorGUILayout.HorizontalScope(GeneralStyles.Toolbar))
-				{
-					if (this.breadcrumbLeft == null)
-					{
-						this.breadcrumbLeft = new GUIStyle(GUI.skin.FindStyle("GUIEditor.BreadcrumbLeftBackground") ?? GUI.skin.FindStyle("guieditor.breadcrumbleft"));
-						this.breadcrumbLeft.padding = new RectOffset(10, 10, 0, 0);
-						this.breadcrumbLeft.stretchHeight = true;
-						this.breadcrumbLeft.alignment = TextAnchor.MiddleCenter;
-
-						this.breadcrumbMid = new GUIStyle(GUI.skin.FindStyle("GUIEditor.BreadcrumbMidBackground") ?? GUI.skin.FindStyle("guieditor.breadcrumbmid"));
-						this.breadcrumbMid.padding = new RectOffset(10, 10, 0, 0);
-						this.breadcrumbMid.stretchHeight = true;
-						this.breadcrumbMid.alignment = TextAnchor.MiddleCenter;
-					}
-
-					string packageLabel = package.name;
-					Utility.content.text = packageLabel;
-					
-					Rect		r2 = GUILayoutUtility.GetRect(Utility.content, this.breadcrumbLeft);
-
-					if (Event.current.type == EventType.ValidateCommand)
-					{
-						if (Event.current.commandName == "Find")
-							Event.current.Use();
-					}
-					else if (GUI.Button(r2, Utility.content, this.breadcrumbLeft) == true ||
-							 (Event.current.type == EventType.ExecuteCommand && Event.current.commandName == "Find"))
-					{
-						if (this.selectedVersion != -1 && Event.current.button == 0 && Event.current.type != EventType.ExecuteCommand)
-						{
-							this.selectedVersion = -1;
-							this.selectedLanguage = null;
-						}
-						else
-						{
-							List<string>	labels = new List<string>(this.database.Packages.Length);
-
-							for (int i = 0, max = this.database.Packages.Length; i < max; ++i)
-								labels.Add(this.database.Packages[i].name);
-
-							if (Event.current.type == EventType.ExecuteCommand)
-							{
-								r2.position += Utility.GetParentScreenPosition(this).position + this.position.position;
-								r2.y += 24F;
-							}
-							else
-								r2.position = GUIUtility.GUIToScreenPoint(r2.position);
-
-							r2.x += this.breadcrumbLeft.padding.left;
-							r2.y += r2.height;
-
-							StringSelector	selector = StringSelector.Create(r2, false, labels.ToArray(), (s) =>
-							{
-								this.selectedPackage = labels.IndexOf(s);
-
-								if (version != null)
-								{
-									Package	newPackage = this.database.Packages[this.selectedPackage];
-
-									for (int i = 0, max = newPackage.versions.Length; i < max; ++i)
-									{
-										Version	element = newPackage.versions[i];
-
-										if (version.status == element.status)
-										{
-											this.selectedVersion = i;
-											break;
-										}
-									}
-								}
-								else
-								{
-									float	offset = 0F;
-
-									for (int i = 0, max = this.database.Packages.Length; i < max; ++i)
-									{
-										float	height = this.GetPackageHeight(this.database.Packages[i]);
-
-										if (i == this.selectedPackage)
-										{
-											this.targetHighlightPackage = this.database.Packages[i];
-											this.targetHighlightPackageAnim = new BgColorContentAnimator(this.Repaint, 0F, 1F);
-											this.targetHighlightPackageAnim.af.speed = .5F;
-
-											if (offset < this.packagesScrollbar.Offset)
-												this.packagesScrollbar.Offset = offset;
-											if (offset + height > this.packagesScrollbar.Offset + this.packagesScrollbar.MaxHeight)
-												this.packagesScrollbar.Offset = offset + height - this.packagesScrollbar.MaxHeight;
-											break;
-										}
-
-										offset += height;
-									}
-								}
-
-								GUI.FocusControl(null);
-								this.Repaint();
-							}, true);
-
-							selector.CloseOnSelection = true;
-							selector.Window.Selected = this.selectedPackage;
-							selector.Window.Scrollbar.RealHeight = (selector as ISearchSelector).GetTotalHeight();
-							selector.Window.JumpToSelected();
-
-							GUIUtility.ExitGUI();
-						}
-					}
-					XGUIHighlightManager.DrawHighlight(NGPublisherWindow.Title + ".Package", this, r2, XGUIHighlights.Glow | XGUIHighlights.Rectangle);
-
-					if (version != null)
-					{
-						Utility.content.text = version.status;
-						r2 = GUILayoutUtility.GetRect(Utility.content, this.breadcrumbMid);
-
-						using (ColorStyleRestorer.Get(this.breadcrumbMid, Status.GetColor(version.status)))
-						{
-							if (GUI.Button(r2, Utility.content, this.breadcrumbMid) == true)
-							{
-								if (this.selectedLanguage != null && Event.current.button == 0)
-									this.selectedLanguage = null;
-								else
-								{
-									List<string>	labels = new List<string>(package.versions.Length);
-
-									for (int i = 0, max = package.versions.Length; i < max; ++i)
-										labels.Add(package.versions[i].status);
-
-									r2.position = GUIUtility.GUIToScreenPoint(r2.position);
-									r2.x += this.breadcrumbMid.padding.left;
-									r2.y += r2.height;
-
-									StringSelector	selector = StringSelector.Create(r2, false, labels.ToArray(), (s) =>
-									{
-										this.selectedVersion = labels.IndexOf(s);
-										EditorGUIUtility.editingTextField = false;
-										GUI.FocusControl(null);
-										this.Repaint();
-									}, true);
-
-									selector.CloseOnSelection = true;
-									selector.Window.Selected = this.selectedVersion;
-									selector.Window.Scrollbar.RealHeight = (selector as ISearchSelector).GetTotalHeight();
-									selector.Window.JumpToSelected();
-
-									GUIUtility.ExitGUI();
-								}
-							}
-						}
-						XGUIHighlightManager.DrawHighlight(NGPublisherWindow.Title + ".Version", this, r2, XGUIHighlights.Glow | XGUIHighlights.Rectangle);
-
-						if (string.IsNullOrEmpty(this.selectedLanguage) == false)
-						{
-							Utility.content.text = this.selectedLanguage;
-							r2 = GUILayoutUtility.GetRect(Utility.content, this.breadcrumbMid);
-
-							if (GUI.Button(r2, Utility.content, this.breadcrumbMid) == true)
-							{
-								int	n = this.database.versions.FindIndex(v => v.package.version.id == version.id);
-
-								if (n != -1)
-								{
-									VersionDetailed	versionDetail = this.database.versions[n];
-									VersionDetailed.Package.Version	VDPVersion = versionDetail.package.version;
-									List<string>	labels = new List<string>();
-
-									foreach (VersionDetailed.Package.Version.Language lang in VDPVersion.EachLanguage)
-										labels.Add(lang.languageCode);
-
-									r2.position = GUIUtility.GUIToScreenPoint(r2.position);
-									r2.x += this.breadcrumbMid.padding.left;
-									r2.y += r2.height;
-
-									StringSelector	selector = StringSelector.Create(r2, false, labels.ToArray(), (s) =>
-									{
-										this.selectedLanguage = s;
-										GUI.FocusControl(null);
-										this.Repaint();
-									}, true);
-
-									selector.CloseOnSelection = true;
-									selector.Window.Selected = labels.IndexOf(this.selectedLanguage);
-									selector.Window.Scrollbar.RealHeight = (selector as ISearchSelector).GetTotalHeight();
-									selector.Window.JumpToSelected();
-
-									GUIUtility.ExitGUI();
-								}
-							}
-							XGUIHighlightManager.DrawHighlight(NGPublisherWindow.Title + ".Language", this, r2, XGUIHighlights.Glow | XGUIHighlights.Rectangle);
-						}
-					}
-
-					GUILayout.FlexibleSpace();
-				}
-
-				if (language != null)
-					this.OnGUIVersionLanguage(version, language);
-				else if (version != null)
-					this.OnGUIVersion(version);
-				else
-					this.OnGUIPackages();
+				if (this.mainTab == MainTab.Packages)
+					this.OnGUIMainPackages();
+				else if (this.mainTab == MainTab.Sales)
+					this.OnGUIMainSales();
 			}
 			catch (ExitGUIException)
 			{
@@ -828,6 +663,482 @@ namespace NGPublisher
 			{
 				this.errorPopup.error = ex;
 			}
+		}
+
+		private void	OnGUIMainSales()
+		{
+			string	today = DateTime.Now.ToString("yyyy-MM-dd");
+			bool	isFetchingPeriods = this.publisherAPI.IsGettingPeriods(this.publisherAPI.Session.publisher);
+
+			if (isFetchingPeriods == true)
+			{
+				Utility.content.text = "Loading periods...";
+				Utility.content.image = GeneralStyles.StatusWheel.image;
+				GUILayout.Label(Utility.content, GeneralStyles.BigCenterText);
+				Utility.content.image = null;
+				this.Repaint();
+				return;
+			}
+
+			if (this.database.HasPeriods == true)
+			{
+				using (new EditorGUILayout.HorizontalScope())
+				{
+					if (this.assetsAsLabel == null)
+					{
+						this.assetsAsLabel = new string[this.database.Packages.Length + 1];
+						this.assetsAsLabel[0] = "All";
+
+						for (int i = 0, max = this.database.Packages.Length; i < max; ++i)
+							this.assetsAsLabel[i + 1] = this.database.Packages[i].name;
+					}
+
+					this.selectedAssetForExport = Mathf.Clamp(this.selectedAssetForExport, 0, this.assetsAsLabel.Length - 1);
+					this.selectedPeriodForExport = Mathf.Clamp(this.selectedPeriodForExport, 0, this.database.Periods.Length - 1);
+
+					if (this.editExport == true)
+					{
+						GUILayout.Label("Export");
+						this.selectedAssetForExport = EditorGUILayout.Popup(this.selectedAssetForExport, this.assetsAsLabel, GUILayoutOptionPool.Width(100F));
+						GUILayout.Label("to");
+						this.selectedExporter = EditorGUILayout.Popup(this.selectedExporter, this.exportersAsLabel, GUILayoutOptionPool.Width(50F));
+						GUILayout.Label("since");
+						this.selectedPeriodForExport = NGEditorGUILayout.Popup(null, this.selectedPeriodForExport, this.database.Periods, p => p.name);
+
+						if (GUILayout.Button("Save") == true)
+						{
+							this.editExport = !this.editExport;
+							this.exportLabel = null;
+						}
+					}
+					else
+					{
+						if (this.exportLabel == null)
+							this.exportLabel = "Export " + this.assetsAsLabel[this.selectedAssetForExport] + " to " + this.exportersAsLabel[this.selectedExporter] + " since " + this.database.Periods[this.selectedPeriodForExport].name;
+
+						using (BgColorContentRestorer.Get(GeneralStyles.HighlightActionButton))
+						{
+							if (GUILayout.Button(this.exportLabel, "ButtonLeft") == true)
+							{
+								this.exportRoutine = QueueRoutine.Create();
+								this.exportRoutine.HandleError(qr =>
+								{
+									this.exportRoutine = null;
+									Utility.AsyncProgressBarClear();
+									Debug.LogError(qr.CurrentCommand.Error);
+								});
+								this.exportRoutine.AddCommand(this.ExportMetrics);
+								this.exportRoutine.Start();
+							}
+						}
+
+						if (GUILayout.Button("☰", "ButtonRight") == true)
+							this.editExport = !this.editExport;
+					}
+
+					if (this.exportRoutine != null)
+					{
+						if (GUILayout.Button("Cancel Export") == true)
+						{
+							Utility.AsyncProgressBarClear();
+							this.exportRoutine.Stop();
+							this.exportRoutine = null;
+						}
+					}
+
+					GUILayout.FlexibleSpace();
+
+					if (this.database.Periods[0].value == DateTime.Now.Year * 100 + DateTime.Now.Month + 1 && this.publisherAPI.IsGettingPeriods(this.publisherAPI.Session.publisher) == false)
+						this.database.RequestPeriods(this.publisherAPI, this.HandleErrorOnly);
+
+					this.selectedPeriod = NGEditorGUILayout.Popup(null, this.selectedPeriod, this.database.Periods, p => p.name);
+				}
+
+				Event	currentEvent = Event.current;
+
+				if (currentEvent.type == EventType.KeyDown && currentEvent.control == true)
+				{
+					if (currentEvent.keyCode == KeyCode.RightArrow)
+					{
+						if (this.selectedPeriod - 1 >= 0)
+						{
+							--this.selectedPeriod;
+							GUI.FocusControl(null);
+							Event.current.Use();
+						}
+					}
+					else if (currentEvent.keyCode == KeyCode.LeftArrow)
+					{
+						if (this.selectedPeriod + 1 < this.database.Periods.Length)
+						{
+							++this.selectedPeriod;
+							GUI.FocusControl(null);
+							Event.current.Use();
+						}
+					}
+				}
+
+				Period	period = this.database.Periods[this.selectedPeriod];
+				bool	isFetchingSaleCounts = this.publisherAPI.IsGettingSaleCounts(this.publisherAPI.Session.publisher, period.value);
+
+				if (period.HasSales == false && isFetchingSaleCounts == false)
+				{
+					isFetchingSaleCounts = true;
+					this.database.RequestSaleCounts(this.publisherAPI, period, this.HandleErrorOnly);
+				}
+
+				bool	isFetchingFreeDownloads = this.publisherAPI.IsGettingFreeDownloads(this.publisherAPI.Session.publisher, period.value);
+
+				if (period.HasDownloads == false && isFetchingFreeDownloads == false)
+				{
+					isFetchingFreeDownloads = true;
+					this.database.RequestFreeDownloads(this.publisherAPI, period, this.HandleErrorOnly);
+				}
+
+				EditorGUILayout.Space();
+
+				using (new EditorGUILayout.HorizontalScope())
+				{
+					if (GUILayout.Button("Refresh Current Month") == true)
+					{
+						this.database.RequestSaleCounts(this.publisherAPI, period, this.HandleErrorOnly);
+						this.database.RequestFreeDownloads(this.publisherAPI, period, this.HandleErrorOnly);
+					}
+
+					GUILayout.FlexibleSpace();
+				}
+
+				this.displaySales = EditorGUILayout.Foldout(this.displaySales, "Sales", true);
+				if (this.displaySales == true)
+				{
+					if (isFetchingSaleCounts == true)
+					{
+						Utility.content.text = "Fetching sales...";
+						Utility.content.image = GeneralStyles.StatusWheel.image;
+						GUILayout.Label(Utility.content, GeneralStyles.BigCenterText);
+						Utility.content.image = null;
+						this.Repaint();
+					}
+
+					if (period.HasSales == true)
+					{
+						using (new EditorGUILayout.HorizontalScope())
+						{
+							EditorGUILayout.LabelField("Package", EditorStyles.boldLabel, GUILayoutOptionPool.MaxWidth(200F));
+							EditorGUILayout.LabelField("Price", EditorStyles.boldLabel, GUILayoutOptionPool.Width(60F));
+							EditorGUILayout.LabelField("Qty", EditorStyles.boldLabel, GUILayoutOptionPool.Width(50F));
+							EditorGUILayout.LabelField("Refunds", EditorStyles.boldLabel, GUILayoutOptionPool.Width(60F));
+							EditorGUILayout.LabelField("Chargebacks", EditorStyles.boldLabel, GUILayoutOptionPool.Width(90F));
+							EditorGUILayout.LabelField("Gross", EditorStyles.boldLabel, GUILayoutOptionPool.Width(80F));
+							EditorGUILayout.LabelField("First", EditorStyles.boldLabel, GUILayoutOptionPool.Width(75F));
+							EditorGUILayout.LabelField("Last", EditorStyles.boldLabel, GUILayoutOptionPool.Width(75F));
+						}
+
+						for (int i = 0, max = period.Sales.Length; i < max; ++i)
+						{
+							Sale	sale = period.Sales[i];
+
+							using (new EditorGUILayout.HorizontalScope())
+							{
+								if (GUILayout.Button(sale.asset, GeneralStyles.LeftButton, GUILayoutOptionPool.MaxWidth(180F)) == true)
+									Application.OpenURL(sale.short_url);
+
+								EditorGUILayout.TextField(sale.price, GUILayoutOptionPool.Width(60F));
+								EditorGUILayout.IntField(sale.quantity, GUILayoutOptionPool.Width(50F));
+								EditorGUILayout.IntField(sale.refunds, GUILayoutOptionPool.Width(60F));
+								EditorGUILayout.IntField(sale.chargebacks, GUILayoutOptionPool.Width(90F));
+								EditorGUILayout.TextField(sale.gross, GUILayoutOptionPool.Width(80F));
+
+								using (BgColorContentRestorer.Get(today == sale.first, Color.green))
+								{
+									EditorGUILayout.TextField(sale.first, GUILayoutOptionPool.Width(75F));
+								}
+
+								using (BgColorContentRestorer.Get(today == sale.last, Color.green))
+								{
+									EditorGUILayout.TextField(sale.last, GUILayoutOptionPool.Width(75F));
+								}
+							}
+						}
+					}
+				}
+
+				this.displayDownloads = EditorGUILayout.Foldout(this.displayDownloads, "Downloads", true);
+				if (this.displayDownloads == true)
+				{
+					if (isFetchingFreeDownloads == true)
+					{
+						Utility.content.text = "Fetching downloads...";
+						Utility.content.image = GeneralStyles.StatusWheel.image;
+						GUILayout.Label(Utility.content, GeneralStyles.BigCenterText);
+						Utility.content.image = null;
+						this.Repaint();
+					}
+					
+					if (period.HasDownloads == true)
+					{
+						using (new EditorGUILayout.HorizontalScope())
+						{
+							EditorGUILayout.LabelField("Package", EditorStyles.boldLabel, GUILayoutOptionPool.MaxWidth(200F));
+							EditorGUILayout.LabelField("Qty", EditorStyles.boldLabel, GUILayoutOptionPool.Width(50F));
+							EditorGUILayout.LabelField("First", EditorStyles.boldLabel, GUILayoutOptionPool.Width(75F));
+							EditorGUILayout.LabelField("Last", EditorStyles.boldLabel, GUILayoutOptionPool.Width(75F));
+						}
+
+						for (int i = 0, max = period.Downloads.Length; i < max; ++i)
+						{
+							Download	download = period.Downloads[i];
+
+							using (new EditorGUILayout.HorizontalScope())
+							{
+								if (GUILayout.Button(download.asset, GeneralStyles.LeftButton, GUILayoutOptionPool.MaxWidth(180F)) == true)
+									Application.OpenURL(download.short_url);
+
+								EditorGUILayout.IntField(download.quantity, GUILayoutOptionPool.Width(50F));
+
+								using (BgColorContentRestorer.Get(today == download.first, Color.green))
+								{
+									EditorGUILayout.TextField(download.first, GUILayoutOptionPool.Width(75F));
+								}
+
+								using (BgColorContentRestorer.Get(today == download.last, Color.green))
+								{
+									EditorGUILayout.TextField(download.last, GUILayoutOptionPool.Width(75F));
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		private void	OnGUIMainPackages()
+		{
+			this.selectedPackage = Mathf.Clamp(this.selectedPackage, 0, this.database.Packages.Length - 1);
+
+			if (this.selectedPackage < 0 || this.selectedPackage >= this.database.Packages.Length)
+				return;
+
+			Package										package = this.database.Packages[this.selectedPackage];
+			Version										version = null;
+			VersionDetailed.Package.Version.Language	language = null;
+
+			if (this.selectedVersion != -1)
+			{
+				this.selectedVersion = Mathf.Clamp(this.selectedVersion, 0, package.versions.Length - 1);
+
+				if (this.selectedVersion >= 0 && this.selectedVersion < package.versions.Length)
+				{
+					version = package.versions[this.selectedVersion];
+
+					if (this.selectedLanguage != null)
+					{
+						if (version.detailed != null)
+							language = version.detailed.package.version[this.selectedLanguage];
+					}
+				}
+			}
+
+			using (new EditorGUILayout.HorizontalScope(GeneralStyles.Toolbar))
+			{
+				if (this.breadcrumbLeft == null)
+				{
+					this.breadcrumbLeft = new GUIStyle(GUI.skin.FindStyle("GUIEditor.BreadcrumbLeftBackground") ?? GUI.skin.FindStyle("guieditor.breadcrumbleft"));
+					this.breadcrumbLeft.padding = new RectOffset(10, 10, 0, 0);
+					this.breadcrumbLeft.stretchHeight = true;
+					this.breadcrumbLeft.alignment = TextAnchor.MiddleCenter;
+
+					this.breadcrumbMid = new GUIStyle(GUI.skin.FindStyle("GUIEditor.BreadcrumbMidBackground") ?? GUI.skin.FindStyle("guieditor.breadcrumbmid"));
+					this.breadcrumbMid.padding = new RectOffset(10, 10, 0, 0);
+					this.breadcrumbMid.stretchHeight = true;
+					this.breadcrumbMid.alignment = TextAnchor.MiddleCenter;
+				}
+
+				string	packageLabel = package.name;
+				Utility.content.text = packageLabel;
+
+				Rect	r = GUILayoutUtility.GetRect(Utility.content, this.breadcrumbLeft);
+
+				if (Event.current.type == EventType.ValidateCommand)
+				{
+					if (Event.current.commandName == "Find")
+						Event.current.Use();
+				}
+				else if (GUI.Button(r, Utility.content, this.breadcrumbLeft) == true ||
+						 (Event.current.type == EventType.ExecuteCommand && Event.current.commandName == "Find"))
+				{
+					if (this.selectedVersion != -1 && Event.current.button == 0 && Event.current.type != EventType.ExecuteCommand)
+					{
+						this.selectedVersion = -1;
+						this.selectedLanguage = null;
+					}
+					else
+					{
+						List<string>	labels = new List<string>(this.database.Packages.Length);
+
+						for (int i = 0, max = this.database.Packages.Length; i < max; ++i)
+							labels.Add(this.database.Packages[i].name);
+
+						if (Event.current.type == EventType.ExecuteCommand)
+						{
+							r.position += Utility.GetParentScreenPosition(this).position + this.position.position;
+							r.y += 24F;
+						}
+						else
+							r.position = GUIUtility.GUIToScreenPoint(r.position);
+
+						r.x += this.breadcrumbLeft.padding.left;
+						r.y += r.height;
+
+						StringSelector	selector = StringSelector.Create(r, false, labels.ToArray(), (s) =>
+						{
+							this.selectedPackage = labels.IndexOf(s);
+
+							if (version != null)
+							{
+								Package	newPackage = this.database.Packages[this.selectedPackage];
+
+								for (int i = 0, max = newPackage.versions.Length; i < max; ++i)
+								{
+									Version	element = newPackage.versions[i];
+
+									if (version.status == element.status)
+									{
+										this.selectedVersion = i;
+										break;
+									}
+								}
+							}
+							else
+							{
+								float	offset = 0F;
+
+								for (int i = 0, max = this.database.Packages.Length; i < max; ++i)
+								{
+									float	height = this.GetPackageHeight(this.database.Packages[i]);
+
+									if (i == this.selectedPackage)
+									{
+										this.targetHighlightPackage = this.database.Packages[i];
+										this.targetHighlightPackageAnim = new BgColorContentAnimator(this.Repaint, 0F, 1F);
+										this.targetHighlightPackageAnim.af.speed = .5F;
+
+										if (offset < this.packagesScrollbar.Offset)
+											this.packagesScrollbar.Offset = offset;
+										if (offset + height > this.packagesScrollbar.Offset + this.packagesScrollbar.MaxHeight)
+											this.packagesScrollbar.Offset = offset + height - this.packagesScrollbar.MaxHeight;
+										break;
+									}
+
+									offset += height;
+								}
+							}
+
+							GUI.FocusControl(null);
+							this.Repaint();
+						}, true);
+
+						selector.CloseOnSelection = true;
+						selector.Window.Selected = this.selectedPackage;
+						selector.Window.Scrollbar.RealHeight = (selector as ISearchSelector).GetTotalHeight();
+						selector.Window.JumpToSelected();
+
+						GUIUtility.ExitGUI();
+					}
+				}
+				XGUIHighlightManager.DrawHighlight(NGPublisherWindow.Title + ".Package", this, r, XGUIHighlights.Glow | XGUIHighlights.Rectangle);
+
+				if (version != null)
+				{
+					Utility.content.text = version.status;
+					r = GUILayoutUtility.GetRect(Utility.content, this.breadcrumbMid);
+
+					using (ColorStyleRestorer.Get(this.breadcrumbMid, Status.GetColor(version.status)))
+					{
+						if (GUI.Button(r, Utility.content, this.breadcrumbMid) == true)
+						{
+							if (this.selectedLanguage != null && Event.current.button == 0)
+								this.selectedLanguage = null;
+							else
+							{
+								List<string>	labels = new List<string>(package.versions.Length);
+
+								for (int i = 0, max = package.versions.Length; i < max; ++i)
+									labels.Add(package.versions[i].status);
+
+								r.position = GUIUtility.GUIToScreenPoint(r.position);
+								r.x += this.breadcrumbMid.padding.left;
+								r.y += r.height;
+
+								StringSelector	selector = StringSelector.Create(r, false, labels.ToArray(), (s) =>
+								{
+									this.selectedVersion = labels.IndexOf(s);
+									EditorGUIUtility.editingTextField = false;
+									GUI.FocusControl(null);
+									this.Repaint();
+								}, true);
+
+								selector.CloseOnSelection = true;
+								selector.Window.Selected = this.selectedVersion;
+								selector.Window.Scrollbar.RealHeight = (selector as ISearchSelector).GetTotalHeight();
+								selector.Window.JumpToSelected();
+
+								GUIUtility.ExitGUI();
+							}
+						}
+					}
+					XGUIHighlightManager.DrawHighlight(NGPublisherWindow.Title + ".Version", this, r, XGUIHighlights.Glow | XGUIHighlights.Rectangle);
+
+					if (string.IsNullOrEmpty(this.selectedLanguage) == false)
+					{
+						Utility.content.text = this.selectedLanguage;
+						r = GUILayoutUtility.GetRect(Utility.content, this.breadcrumbMid);
+
+						if (GUI.Button(r, Utility.content, this.breadcrumbMid) == true)
+						{
+							int	n = this.database.versions.FindIndex(v => v.package.version.id == version.id);
+
+							if (n != -1)
+							{
+								VersionDetailed					versionDetail = this.database.versions[n];
+								VersionDetailed.Package.Version	VDPVersion = versionDetail.package.version;
+								List<string>					labels = new List<string>();
+
+								foreach (VersionDetailed.Package.Version.Language lang in VDPVersion.EachLanguage)
+									labels.Add(lang.languageCode);
+
+								r.position = GUIUtility.GUIToScreenPoint(r.position);
+								r.x += this.breadcrumbMid.padding.left;
+								r.y += r.height;
+
+								StringSelector	selector = StringSelector.Create(r, false, labels.ToArray(), (s) =>
+								{
+									this.selectedLanguage = s;
+									GUI.FocusControl(null);
+									this.Repaint();
+								}, true);
+
+								selector.CloseOnSelection = true;
+								selector.Window.Selected = labels.IndexOf(this.selectedLanguage);
+								selector.Window.Scrollbar.RealHeight = (selector as ISearchSelector).GetTotalHeight();
+								selector.Window.JumpToSelected();
+
+								GUIUtility.ExitGUI();
+							}
+						}
+						XGUIHighlightManager.DrawHighlight(NGPublisherWindow.Title + ".Language", this, r, XGUIHighlights.Glow | XGUIHighlights.Rectangle);
+					}
+				}
+
+				GUILayout.FlexibleSpace();
+			}
+
+			if (language != null)
+				this.OnGUIVersionLanguage(version, language);
+			else if (version != null)
+				this.OnGUIVersion(version);
+			else
+				this.OnGUIPackages();
 		}
 
 		private void	OnGUIAuthentication()
@@ -858,7 +1169,7 @@ namespace NGPublisher
 
 								Response	response = JsonUtility.FromJson<Response>(result);
 
-								if (response.status == "error")
+								if (response.Succeeded == false)
 								{
 									if (Conf.DebugMode == Conf.DebugState.Verbose)
 										Debug.LogError(result);
@@ -899,10 +1210,22 @@ namespace NGPublisher
 			}
 		}
 
+		private float restoreOffset;
+
 		private void	OnGUIPackages()
 		{
 			if (this.packagesScrollbar == null)
+			{
 				this.packagesScrollbar = new VerticalScrollbar(0F, 0F, 0F);
+				this.restoreOffset = NGEditorPrefs.GetFloat(NGPublisherWindow.PackagesScrollbarOffsetKeyPref, -1, true);
+
+				//if (restoreOffset > 0F)
+				//{
+				//	Event	e = EditorGUIUtility.CommandEvent("RestoreOffset");
+				//	e.button = (int)restoreOffset;
+				//	this.SendEvent(new Event(e));
+				//}
+			}
 
 			GUILayout.Space(5F);
 
@@ -970,6 +1293,20 @@ namespace NGPublisher
 			this.packagesScrollbar.SetPosition(r.width - this.packagesScrollbar.MaxWidth, r.y);
 			this.packagesScrollbar.SetSize(r.height);
 			this.packagesScrollbar.OnGUI();
+
+			if (this.restoreOffset > 0F && Event.current.type != EventType.Layout)
+			{
+				this.packagesScrollbar.Offset = this.restoreOffset;
+				this.restoreOffset = -1F;
+			}
+			//if (Event.current.type == EventType.ExecuteCommand)
+			//{
+			//	if (Event.current.commandName == "RestoreOffset")
+			//	{
+			//		this.packagesScrollbar.Offset = Event.current.button;
+			//		Event.current.Use();
+			//	}
+			//}
 
 			r.width -= this.packagesScrollbar.MaxWidth;
 			GUI.BeginGroup(r);
@@ -1103,6 +1440,19 @@ namespace NGPublisher
 			EditorGUI.TextField(r3, package.short_url, EditorStyles.miniTextField);
 			Utility.content.image = null;
 
+			if (this.database.HasPackageVouchers(package) == true)
+			{
+				r3.y -= 2F;
+				Utility.content.text = package.short_url;
+				r3.width = 80F;
+				r3.x -= r3.width + 4F;
+				if (GUI.Button(r3, "Vouchers") == true)
+				{
+					VouchersWindow.Open(this.database, this.publisherAPI, package);
+					return;
+				}
+			}
+
 			StringBuilder	buffer = Utility.GetBuffer();
 
 			if (package.average_rating == 0)
@@ -1165,7 +1515,7 @@ namespace NGPublisher
 
 					if (isCreatingDraft == true)
 					{
-						GUI.Label(r4, GeneralStyles.StatusWheel);
+						GUI.DrawTexture(r4, GeneralStyles.StatusWheel.image, ScaleMode.ScaleToFit);
 						this.Repaint();
 					}
 				}
@@ -2220,7 +2570,7 @@ namespace NGPublisher
 				using (new EditorGUILayout.VerticalScope())
 				{
 					GUILayout.Label(label + " (" + requiredWidth + "x" + requiredHeight + ")", GeneralStyles.Title1);
-					GUILayout.Label(description, GeneralStyles.WrapLabel);
+					GUILayout.Label(description, EditorStyles.wordWrappedLabel);
 				}
 			}
 
@@ -2486,6 +2836,68 @@ namespace NGPublisher
 			}
 
 			return result;
+		}
+
+		private IEnumerable	ExportMetrics()
+		{
+			List<Period>	periods = new List<Period>(this.selectedPeriodForExport + 1);
+			int				i = this.selectedPeriodForExport;
+
+			for (; i >= 0; --i)
+				periods.Add(this.database.Periods[i]);
+
+			periods.Reverse();
+
+			i = 0;
+			int	max = periods.Count;
+
+			while (i < max)
+			{
+				Period	period = periods[i];
+				int		missingCount = 0;
+
+				if (period.HasSales == false)
+				{
+					++missingCount;
+
+					if (this.publisherAPI.IsGettingSaleCounts(this.publisherAPI.Session.publisher, period.value) == false)
+						this.database.RequestSaleCounts(this.publisherAPI, period, this.HandleErrorOnly);
+				}
+
+				if (period.HasDownloads == false)
+				{
+					++missingCount;
+
+					if (this.publisherAPI.IsGettingFreeDownloads(this.publisherAPI.Session.publisher, period.value) == false)
+						this.database.RequestFreeDownloads(this.publisherAPI, period, this.HandleErrorOnly);
+				}
+
+				if (missingCount > 0)
+				{
+					Utility.AsyncProgressBarDisplay("Fetching " + period.name + " (" + (i + i + 2 - missingCount) + " / " + (max + max) + ")", (i + i + 2 - missingCount) / (float)(max + max));
+
+					yield return null;
+					continue;
+				}
+
+				++i;
+			}
+
+			this.ExportPeriodsToClipboard(periods);
+			this.Repaint();
+
+			this.exportRoutine = null;
+			Utility.AsyncProgressBarClear();
+		}
+
+		private void	ExportPeriodsToClipboard(IEnumerable<Period> periods)
+		{
+			StringBuilder	buffer = Utility.GetBuffer();
+
+			this.exporters[this.selectedExporter].ExportPeriod(buffer, periods, this.selectedAssetForExport == 0 ? null : this.assetsAsLabel[this.selectedAssetForExport]);
+
+			EditorGUIUtility.systemCopyBuffer = Utility.ReturnBuffer(buffer);
+			this.ShowNotification(new GUIContent("Metrics copied to clipboard."));
 		}
 
 		/// <summary>Returns false if the response is invalid and feeds the error to the user.</summary>

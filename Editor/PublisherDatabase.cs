@@ -64,6 +64,60 @@ namespace NGPublisher
 			}
 		}
 
+		[SerializeField]
+		private bool	hasVoucherPackages;
+		public bool		HasVoucherPackages { get { return this.hasVoucherPackages; } }
+		[SerializeField]
+		private VoucherPackage[]	voucherPackages;
+		public VoucherPackage[]		VoucherPackages
+		{
+			get
+			{
+				return this.voucherPackages;
+			}
+			set
+			{
+				this.hasVoucherPackages = true;
+				this.voucherPackages = value;
+			}
+		}
+
+		[SerializeField]
+		private bool	hasVouchers;
+		public bool		HasVouchers { get { return this.hasVouchers; } }
+		[SerializeField]
+		private Voucher[]	vouchers;
+		public Voucher[]	Vouchers
+		{
+			get
+			{
+				return this.vouchers;
+			}
+			set
+			{
+				this.hasVouchers = true;
+				this.vouchers = value;
+			}
+		}
+
+		[SerializeField]
+		private bool	hasPeriods;
+		public bool		HasPeriods { get { return this.hasPeriods; } }
+		[SerializeField]
+		private Period[]	periods;
+		public Period[]		Periods
+		{
+			get
+			{
+				return this.periods;
+			}
+			set
+			{
+				this.hasPeriods = true;
+				this.periods = value;
+			}
+		}
+
 		public string	GetLanguage(string languageCode)
 		{
 			if (this.Languages != null)
@@ -80,6 +134,38 @@ namespace NGPublisher
 			return languageCode;
 		}
 
+		public bool	HasPackageVouchers(Package package)
+		{
+			if (this.voucherPackages == null)
+				return false;
+
+			for (int i = 0, max = this.voucherPackages.Length; i < max; ++i)
+			{
+				VoucherPackage	voucherPackage = this.voucherPackages[i];
+
+				if (voucherPackage.packageId == package.id)
+					return true;
+			}
+
+			return false;
+		}
+
+		public Period	GetPeriod(int periodId)
+		{
+			if (this.periods == null)
+				return null;
+
+			for (int i = 0, max = this.periods.Length; i < max; ++i)
+			{
+				Period	period = this.periods[i];
+
+				if (period.value == periodId)
+					return period;
+			}
+
+			return null;
+		}
+
 		void	ISerializationCallbackReceiver.OnBeforeSerialize()
 		{
 		}
@@ -94,6 +180,15 @@ namespace NGPublisher
 
 			if (this.hasVets == false)
 				this.vets = null;
+
+			if (this.hasVoucherPackages == false)
+				this.voucherPackages = null;
+
+			if (this.hasVouchers == false)
+				this.vouchers = null;
+
+			if (this.hasPeriods == false)
+				this.periods = null;
 
 			// Link detailed versions to their version in packages.
 			if (this.Packages != null && this.versions != null)

@@ -21,10 +21,14 @@ namespace NGPublisher
 			public string	error;
 		}
 
+		public bool	Succeeded { get { return this.success == true || this.status == "ok"; } }
+
+		public bool		success;
 		public string	status;
 		public Errors	errors;
 		public string	url;
 		public int		id; // Create draft
+		public string	voucher_code; // Create voucher
 
 		public static string	MergeErrors(string input)
 		{

@@ -482,58 +482,121 @@ namespace NGPublisher
 			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
 		}
 
-		public void	FetchPeriods(int publisherID, Action<HttpWebResponse, string> onCompleted)
+		public bool	IsGettingVoucherPackages(int publisherId)
 		{
-			string			endpoint = PublisherAPI.EndPoint + "api/publisher-info/months/" + publisherID + ".json";
+			lock (this.runningRequests)
+			{
+				return this.runningRequests.Contains((PublisherAPI.EndPoint + "api/publisher-info/voucher-packages/" + publisherId + ".json").GetHashCode());
+			}
+		}
+
+		public void	GetVoucherPackages(int publisherId, Action<HttpWebResponse, string> onCompleted)
+		{
+			string			endpoint = PublisherAPI.EndPoint + "api/publisher-info/voucher-packages/" + publisherId + ".json";
 			HttpWebRequest	request = this.CreateRequest(endpoint);
 
 			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
 		}
 
-		public void	FetchFreeDownloads(int publisherID, int periodID, Action<HttpWebResponse, string> onCompleted)
+		public bool	IsGettingVouchers(int publisherId)
 		{
-			string			endpoint = PublisherAPI.EndPoint + "api/publisher-info/downloads/" + publisherID + "/" + periodID + ".json";
+			lock (this.runningRequests)
+			{
+				return this.runningRequests.Contains((PublisherAPI.EndPoint + "api/publisher-info/vouchers/" + publisherId + ".json").GetHashCode());
+			}
+		}
+
+		public void	GetVouchers(int publisherId, Action<HttpWebResponse, string> onCompleted)
+		{
+			string			endpoint = PublisherAPI.EndPoint + "api/publisher-info/vouchers/" + publisherId + ".json";
 			HttpWebRequest	request = this.CreateRequest(endpoint);
 
 			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
 		}
 
-		public void	FetchSaleCounts(int publisherID, int periodID, Action<HttpWebResponse, string> onCompleted)
+		public bool	IsCreatingVoucher(int publisherId, int packageId)
 		{
-			string			endpoint = PublisherAPI.EndPoint + "api/publisher-info/sales/" + publisherID + "/" + periodID + ".json";
-			HttpWebRequest	request = this.CreateRequest(endpoint);
-
-			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
+			lock (this.runningRequests)
+			{
+				return this.runningRequests.Contains((PublisherAPI.EndPoint + "api/publisher-info/voucher-freepackage/" + publisherId + ".json").GetHashCode() + packageId);
+			}
 		}
 
-		public void	GetAPIKey(int publisherID, Action<HttpWebResponse, string> onCompleted)
+		public void	CreateVoucher(int publisherId, int packageId, Action<HttpWebResponse, string> onCompleted)
 		{
-			string			endpoint = PublisherAPI.EndPoint + "api/publisher-info/api-key/" + publisherID + ".json";
-			HttpWebRequest	request = this.CreateRequest(endpoint);
-
-			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
-		}
-
-		public void	CreateVoucher(int publisherID, int packageID, Action<HttpWebResponse, string> onCompleted)
-		{
-			string			endpoint = PublisherAPI.EndPoint + "api/publisher-info/voucher-freepackage/" + publisherID + ".json";
+			string			endpoint = PublisherAPI.EndPoint + "api/publisher-info/voucher-freepackage/" + publisherId + ".json";
 			HttpWebRequest	request = this.CreateRequest(endpoint);
 			StringBuilder	buffer = Utility.GetBuffer();
 
-			buffer.Append("{\"package_id\":\"");
-			buffer.Append(packageID);
-			buffer.Append("\"}");
+			buffer.Append("package_id=");
+			buffer.Append(packageId);
 
 			byte[]	content = Encoding.UTF8.GetBytes(Utility.ReturnBuffer(buffer));
 
 			request.Method = "POST";
-			request.ContentType = "application/json";
+			request.ContentType = " application/x-www-form-urlencoded; charset=UTF-8";
 			request.ContentLength = content.Length;
 
 			using (Stream stream = request.GetRequestStream())
 			{
 				stream.Write(content, 0, content.Length);
 			}
+
+			this.HandleRequest(request, endpoint.GetHashCode() + packageId, onCompleted);
+		}
+
+		public bool	IsGettingPeriods(int publisherId)
+		{
+			lock (this.runningRequests)
+			{
+				return this.runningRequests.Contains((PublisherAPI.EndPoint + "api/publisher-info/months/" + publisherId + ".json").GetHashCode());
+			}
+		}
+
+		public void	GetPeriods(int publisherId, Action<HttpWebResponse, string> onCompleted)
+		{
+			string			endpoint = PublisherAPI.EndPoint + "api/publisher-info/months/" + publisherId + ".json";
+			HttpWebRequest	request = this.CreateRequest(endpoint);
+
+			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
+		}
+
+		public bool	IsGettingSaleCounts(int publisherId, int periodId)
+		{
+			lock (this.runningRequests)
+			{
+				return this.runningRequests.Contains((PublisherAPI.EndPoint + "api/publisher-info/sales/" + publisherId + "/" + periodId + ".json").GetHashCode());
+			}
+		}
+
+		public void	GetSaleCounts(int publisherId, int periodId, Action<HttpWebResponse, string> onCompleted)
+		{
+			string			endpoint = PublisherAPI.EndPoint + "api/publisher-info/sales/" + publisherId + "/" + periodId + ".json";
+			HttpWebRequest	request = this.CreateRequest(endpoint);
+
+			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
+		}
+
+		public bool	IsGettingFreeDownloads(int publisherId, int periodId)
+		{
+			lock (this.runningRequests)
+			{
+				return this.runningRequests.Contains((PublisherAPI.EndPoint + "api/publisher-info/downloads/" + publisherId + "/" + periodId + ".json").GetHashCode());
+			}
+		}
+
+		public void	GetFreeDownloads(int publisherId, int periodId, Action<HttpWebResponse, string> onCompleted)
+		{
+			string			endpoint = PublisherAPI.EndPoint + "api/publisher-info/downloads/" + publisherId + "/" + periodId + ".json";
+			HttpWebRequest	request = this.CreateRequest(endpoint);
+
+			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
+		}
+
+		public void	GetAPIKey(int publisherId, Action<HttpWebResponse, string> onCompleted)
+		{
+			string			endpoint = PublisherAPI.EndPoint + "api/publisher-info/api-key/" + publisherId + ".json";
+			HttpWebRequest	request = this.CreateRequest(endpoint);
 
 			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
 		}
