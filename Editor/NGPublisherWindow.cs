@@ -49,50 +49,53 @@ namespace NGPublisher
 
 				r.xMin += 2F;
 
-				for (int i = 0, max = this.options.Length; i < max; ++i)
+				using (new EditorGUI.DisabledScope(this.vetting.input.allow_edit == false))
 				{
-					Vets.Option	option = this.options[i];
-
-					EditorGUI.BeginChangeCheck();
-					bool	toggled = GUI.Toggle(r, value.Contains(option.code), option.label);
-					if (EditorGUI.EndChangeCheck() == true && this.vetting.input.allow_edit == true)
+					for (int i = 0, max = this.options.Length; i < max; ++i)
 					{
-						List<string>	list = new List<string>();
+						Vets.Option	option = this.options[i];
 
-						if (value.Length > 0)
-							list.AddRange(value.Split(','));
-
-						if (toggled == true)
-							list.Add(option.code);
-						else
-							list.Remove(option.code);
-
-						this.vetting.output = new VersionDetailed.Package.Version.UnityPackage.Vetting()
+						EditorGUI.BeginChangeCheck();
+						bool	toggled = GUI.Toggle(r, value.Contains(option.code), option.label);
+						if (EditorGUI.EndChangeCheck() == true)
 						{
-							allow_edit = this.vetting.input.allow_edit,
-							dependencies = this.vetting.input.dependencies,
-							//genesis_vetting_id = this.vetting.input.genesis_vetting_id,
-							id = this.vetting.input.id,
-							platforms = this.vetting.input.platforms,
-							srp_type = this.vetting.input.srp_type,
-							status = this.vetting.input.status,
-							unity_versions = this.vetting.input.unity_versions,
-						};
+							List<string>	list = new List<string>();
 
-						if (this.target == nameof(VersionDetailed.Package.Version.UnityPackage.Vetting.platforms))
-							this.vetting.output.platforms = string.Join(",", list);
-						else if (this.target == nameof(VersionDetailed.Package.Version.UnityPackage.Vetting.unity_versions))
-							this.vetting.output.unity_versions = string.Join(",", list);
-						else if (this.target == nameof(VersionDetailed.Package.Version.UnityPackage.Vetting.srp_type))
-							this.vetting.output.srp_type = string.Join(",", list);
+							if (value.Length > 0)
+								list.AddRange(value.Split(','));
 
-						if (this.vetting.ManualUpdate() == false)
-							this.vetting.input = this.vetting.output;
+							if (toggled == true)
+								list.Add(option.code);
+							else
+								list.Remove(option.code);
 
-						Utility.RepaintEditorWindow(typeof(NGPublisherWindow));
+							this.vetting.output = new VersionDetailed.Package.Version.UnityPackage.Vetting()
+							{
+								allow_edit = this.vetting.input.allow_edit,
+								dependencies = this.vetting.input.dependencies,
+								//genesis_vetting_id = this.vetting.input.genesis_vetting_id,
+								id = this.vetting.input.id,
+								platforms = this.vetting.input.platforms,
+								srp_type = this.vetting.input.srp_type,
+								status = this.vetting.input.status,
+								unity_versions = this.vetting.input.unity_versions,
+							};
+
+							if (this.target == nameof(VersionDetailed.Package.Version.UnityPackage.Vetting.platforms))
+								this.vetting.output.platforms = string.Join(",", list);
+							else if (this.target == nameof(VersionDetailed.Package.Version.UnityPackage.Vetting.unity_versions))
+								this.vetting.output.unity_versions = string.Join(",", list);
+							else if (this.target == nameof(VersionDetailed.Package.Version.UnityPackage.Vetting.srp_type))
+								this.vetting.output.srp_type = string.Join(",", list);
+
+							if (this.vetting.ManualUpdate() == false)
+								this.vetting.input = this.vetting.output;
+
+							Utility.RepaintEditorWindow(typeof(NGPublisherWindow));
+						}
+
+						r.y += r.height;
 					}
-
-					r.y += r.height;
 				}
 			}
 		}
@@ -348,8 +351,8 @@ namespace NGPublisher
 		}
 
 		public const string	Title = "NG Publisher";
-		public const string	LastDatabasePathKeyPref = NGPublisherWindow.Title + "_LastDatabasePath";
-		public const string	PackagesScrollbarOffsetKeyPref = NGPublisherWindow.Title + "_PackagesScrollbarOffset";
+		public const string	LastDatabasePathKeyPref = NGPublisherWindow.Title + "_lastDatabasePath";
+		public const string	PackagesScrollbarOffsetKeyPref = NGPublisherWindow.Title + "_packagesScrollbarOffset";
 		public const string	Path = "Assets/PublisherDatabase.asset";
 		public const string	UnsupportedImageDescription = "This image is not supported. Use the version below.";
 		public const int	IconImageWidthRequired = 160;
@@ -727,7 +730,7 @@ namespace NGPublisher
 									Utility.AsyncProgressBarClear();
 									Debug.LogError(qr.CurrentCommand.Error);
 								});
-								this.exportRoutine.AddCommand(this.ExportMetrics);
+								this.exportRoutine.AddRoutineCommand(this.ExportMetrics);
 								this.exportRoutine.Start();
 							}
 						}
@@ -1171,10 +1174,8 @@ namespace NGPublisher
 
 								if (response.Succeeded == false)
 								{
-									if (Conf.DebugMode == Conf.DebugState.Verbose)
-										Debug.LogError(result);
-
-									Debug.LogError(response.errors.error.Replace("<br>", "\n"));
+									if (response.errors.error != null)
+										Debug.LogError(response.errors.error.Replace("<br>", "\n"));
 									return;
 								}
 							}
@@ -2197,7 +2198,7 @@ namespace NGPublisher
 					r.x += r.width + 10F;
 				}
 				
-				Utility.content.text = "SRP";
+				Utility.content.text = "Deps";
 				r.size = EditorStyles.textField.CalcSize(Utility.content);
 				using (LabelWidthRestorer.Get(r.size.x))
 				{

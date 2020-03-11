@@ -8,6 +8,7 @@ using System.Text;
 using UnityEditor;
 using UnityEditorInternal;
 using UnityEngine;
+using UnityEngine.Networking;
 
 namespace NGPublisher
 {
@@ -24,13 +25,13 @@ namespace NGPublisher
 		private Session			session;
 		private HashSet<int>	runningRequests = new HashSet<int>();
 
-		public PublisherAPI(Session session)
+		public	PublisherAPI(Session session)
 		{
 			if (session != null && session.xunitysession != null)
 				this.session = session;
 		}
 
-		public bool		IsConnecting()
+		public bool	IsConnecting()
 		{
 			lock (this.runningRequests)
 			{
@@ -38,7 +39,7 @@ namespace NGPublisher
 			}
 		}
 
-		public void		Connect(string username, string password, Action<HttpWebResponse, string> onCompleted)
+		public void	Connect(string username, string password, Action<HttpWebResponse, string> onCompleted)
 		{
 			string			endpoint = "https://kharma.unity3d.com/login";
 			HttpWebRequest	request = this.CreateRequest(endpoint);
@@ -82,7 +83,12 @@ namespace NGPublisher
 				{
 					if (Conf.DebugMode == Conf.DebugState.Verbose)
 						Debug.Log(s);
-					this.session = JsonUtility.FromJson<Session>(s);
+
+					if (s.Length > 0 && s[0] == '{')
+					{
+						this.session = JsonUtility.FromJson<Session>(s);
+						this.FetchSessionAndToken(username, password);
+					}
 				}
 
 				onCompleted(r, s);
@@ -94,7 +100,7 @@ namespace NGPublisher
 			this.session = null;
 		}
 
-		public bool		IsGettingAllPackages()
+		public bool	IsGettingAllPackages()
 		{
 			lock (this.runningRequests)
 			{
@@ -102,7 +108,7 @@ namespace NGPublisher
 			}
 		}
 
-		public void		GetAllPackages(Action<HttpWebResponse, string> onCompleted)
+		public void	GetAllPackages(Action<HttpWebResponse, string> onCompleted)
 		{
 			string			endpoint = PublisherAPI.EndPoint + "api/management/packages.json";
 			HttpWebRequest	request = this.CreateRequest(endpoint);
@@ -110,7 +116,7 @@ namespace NGPublisher
 			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
 		}
 
-		public bool		IsGettingLanguages()
+		public bool	IsGettingLanguages()
 		{
 			lock (this.runningRequests)
 			{
@@ -118,7 +124,7 @@ namespace NGPublisher
 			}
 		}
 
-		public void		GetLanguages(Action<HttpWebResponse, string> onCompleted)
+		public void	GetLanguages(Action<HttpWebResponse, string> onCompleted)
 		{
 			string			endpoint = PublisherAPI.EndPoint + "api/management/languages.json";
 			HttpWebRequest	request = this.CreateRequest(endpoint);
@@ -126,7 +132,7 @@ namespace NGPublisher
 			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
 		}
 
-		public bool		IsGettingVettingConfig()
+		public bool	IsGettingVettingConfig()
 		{
 			lock (this.runningRequests)
 			{
@@ -134,7 +140,7 @@ namespace NGPublisher
 			}
 		}
 
-		public void		GetVettingConfig(Action<HttpWebResponse, string> onCompleted)
+		public void	GetVettingConfig(Action<HttpWebResponse, string> onCompleted)
 		{
 			string			endpoint = PublisherAPI.EndPoint + "api/management/vetting-config.json";
 			HttpWebRequest	request = this.CreateRequest(endpoint);
@@ -142,7 +148,7 @@ namespace NGPublisher
 			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
 		}
 
-		public bool		IsGettingCategories(int versionId)
+		public bool	IsGettingCategories(int versionId)
 		{
 			lock (this.runningRequests)
 			{
@@ -151,7 +157,7 @@ namespace NGPublisher
 			}
 		}
 
-		public void		GetCategories(int versionId, Action<HttpWebResponse, string> onCompleted = null)
+		public void	GetCategories(int versionId, Action<HttpWebResponse, string> onCompleted = null)
 		{
 			string			endpoint = PublisherAPI.EndPoint + "api/management/categories/" + versionId + ".json";
 			HttpWebRequest	request = this.CreateRequest(endpoint);
@@ -159,7 +165,7 @@ namespace NGPublisher
 			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
 		}
 
-		public bool		IsGettingPackageVersion(int versionId)
+		public bool	IsGettingPackageVersion(int versionId)
 		{
 			lock (this.runningRequests)
 			{
@@ -167,7 +173,7 @@ namespace NGPublisher
 			}
 		}
 
-		public void		GetPackageVersion(int versionId, Action<HttpWebResponse, string> onCompleted)
+		public void	GetPackageVersion(int versionId, Action<HttpWebResponse, string> onCompleted)
 		{
 			string			endpoint = PublisherAPI.EndPoint + "api/management/package-version/" + versionId + ".json";
 			HttpWebRequest	request = this.CreateRequest(endpoint);
@@ -175,7 +181,7 @@ namespace NGPublisher
 			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
 		}
 
-		public bool		IsCreatingDraft(int versionId)
+		public bool	IsCreatingDraft(int versionId)
 		{
 			lock (this.runningRequests)
 			{
@@ -183,7 +189,7 @@ namespace NGPublisher
 			}
 		}
 
-		public void		CreateDraft(int versionId, Action<HttpWebResponse, string> onCompleted)
+		public void	CreateDraft(int versionId, Action<HttpWebResponse, string> onCompleted)
 		{
 			string			endpoint = PublisherAPI.EndPoint + "api/management/draft/" + versionId + ".json";
 			HttpWebRequest	request = this.CreateRequest(endpoint);
@@ -191,7 +197,7 @@ namespace NGPublisher
 			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
 		}
 
-		public bool		IsDeletingingDraft(int versionId)
+		public bool	IsDeletingingDraft(int versionId)
 		{
 			lock (this.runningRequests)
 			{
@@ -199,7 +205,7 @@ namespace NGPublisher
 			}
 		}
 
-		public void		DeleteDraft(int versionId, Action<HttpWebResponse, string> onCompleted)
+		public void	DeleteDraft(int versionId, Action<HttpWebResponse, string> onCompleted)
 		{
 			string			endpoint = PublisherAPI.EndPoint + "api/management/draft/" + versionId + ".json";
 			HttpWebRequest	request = this.CreateRequest(endpoint);
@@ -209,7 +215,7 @@ namespace NGPublisher
 			this.HandleRequest(request, endpoint.GetHashCode() + "DELETE".GetHashCode(), onCompleted);
 		}
 
-		public bool		IsDeletingingUnityPackage(int versionId, VersionDetailed.Package.Version.UnityPackage unityPackage)
+		public bool	IsDeletingingUnityPackage(int versionId, VersionDetailed.Package.Version.UnityPackage unityPackage)
 		{
 			lock (this.runningRequests)
 			{
@@ -218,7 +224,7 @@ namespace NGPublisher
 			}
 		}
 
-		public void		DeleteUnityPackage(int versionId, VersionDetailed.Package.Version.UnityPackage unityPackage, Action<HttpWebResponse, string> onCompleted)
+		public void	DeleteUnityPackage(int versionId, VersionDetailed.Package.Version.UnityPackage unityPackage, Action<HttpWebResponse, string> onCompleted)
 		{
 			string			endpoint = PublisherAPI.EndPoint + "api/management/unitypackage/" + versionId + "/" + unityPackage.package_upload_id + ".json";
 			HttpWebRequest	request = this.CreateRequest(endpoint);
@@ -228,7 +234,7 @@ namespace NGPublisher
 			this.HandleRequest(request, endpoint.GetHashCode() + "DELETE".GetHashCode(), onCompleted);
 		}
 
-		public bool		IsVettingVersion(int versionId, int uploadID)
+		public bool	IsVettingVersion(int versionId, int uploadID)
 		{
 			lock (this.runningRequests)
 			{
@@ -236,7 +242,7 @@ namespace NGPublisher
 			}
 		}
 
-		public void		VetVersion(int versionId, int uploadID, IEnumerable<string> platforms, IEnumerable<string> unityVersions, IEnumerable<string> srpTypes, IEnumerable<string> dependencies, Action<HttpWebResponse, string> onCompleted)
+		public void	VetVersion(int versionId, int uploadID, IEnumerable<string> platforms, IEnumerable<string> unityVersions, IEnumerable<string> srpTypes, IEnumerable<string> dependencies, Action<HttpWebResponse, string> onCompleted)
 		{
 			string			endpoint = PublisherAPI.EndPoint + "api/management/vetting/" + versionId + ".json";
 			HttpWebRequest	request = this.CreateRequest(endpoint);
@@ -581,13 +587,14 @@ namespace NGPublisher
 		{
 			lock (this.runningRequests)
 			{
-				return this.runningRequests.Contains((PublisherAPI.EndPoint + "api/publisher-info/downloads/" + publisherId + "/" + periodId + ".json").GetHashCode());
+				return this.runningRequests.Contains((PublisherAPI.EndPoint + "api/publisher-info/downloads/" + publisherId + "/" + periodId + ".json?package_filter=all").GetHashCode());
 			}
 		}
 
 		public void	GetFreeDownloads(int publisherId, int periodId, Action<HttpWebResponse, string> onCompleted)
 		{
-			string			endpoint = PublisherAPI.EndPoint + "api/publisher-info/downloads/" + publisherId + "/" + periodId + ".json";
+			string			endpoint = PublisherAPI.EndPoint + "api/publisher-info/downloads/" + publisherId + "/" + periodId + ".json?package_filter=all";
+			Debug.Log(endpoint);
 			HttpWebRequest	request = this.CreateRequest(endpoint);
 
 			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
@@ -808,16 +815,26 @@ namespace NGPublisher
 
 		private HttpWebRequest	CreateRequest(string endpoint)
 		{
-			const string	token = "r8nshMgWofjefYfzIiB2MhYv0/0NCagIonTAqDY67do";
 			HttpWebRequest	request = (HttpWebRequest)WebRequest.Create(endpoint);
 
 			ServicePointManager.ServerCertificateValidationCallback = (a, b, c, d) => true;
 
 			request.CookieContainer = new CookieContainer();
-			request.CookieContainer.Add(new Cookie("kharma_token", token, "/", ".assetstore.unity3d.com"));
 
 			if (this.session != null)
-				request.CookieContainer.Add(new Cookie("kharma_session", this.session.xunitysession, "/", ".assetstore.unity3d.com"));
+			{
+				try
+				{
+					request.CookieContainer.Add(new Cookie("kharma_session", this.session.xunitysession, "/", ".assetstore.unity3d.com"));
+					request.CookieContainer.Add(new Cookie("kharma_token", this.session.kharma_token, "/", ".assetstore.unity3d.com"));
+					request.Headers.Add("X-Kharma-Token", this.session.kharma_token);
+				}
+				catch (Exception ex)
+				{
+					Debug.LogException(ex);
+					this.session = null;
+				}
+			}
 
 			request.Headers.Add(HttpRequestHeader.AcceptLanguage, "fr,fr-FR;q=0.8,en-US;q=0.5,en;q=0.3");
 			request.Headers.Add(HttpRequestHeader.AcceptEncoding, "gzip, deflate, br");
@@ -828,9 +845,100 @@ namespace NGPublisher
 			request.Headers.Add("Origin", PublisherAPI.EndPoint);
 			request.Headers.Add(HttpRequestHeader.Te, "Trailers");
 			request.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:71.0) Gecko/20100101 Firefox/71.0";
-			request.Headers.Add("X-Kharma-Token", token);
+			request.Headers.Add("X-Requested-With", "XMLHttpRequest");
 
 			return request;
+		}
+
+		private void	FetchSessionAndToken(string username, string password)
+		{
+			ServicePointManager.ServerCertificateValidationCallback = (a, b, c, d) => true;
+
+			string	endpoint = "https://publisher.assetstore.unity3d.com/sales.html";
+			string	authenticity_token;
+			string	_genesis_auth_frontend_session;
+
+			// Request the authenticity_token from any page.
+			using (UnityWebRequest w = UnityWebRequest.Get(endpoint))
+			{
+				w.SendWebRequest();
+
+				while (w.isDone == false);
+
+				string	html = w.downloadHandler.text;
+				int		start = html.IndexOf("<input type=\"hidden\" name=\"authenticity_token\" value=\"");
+				Debug.Assert(start != -1, "Input \"authenticity_token\" not found.");
+
+				start += "<input type=\"hidden\" name=\"authenticity_token\" value=\"".Length;
+				int	end = html.IndexOf('"', start);
+				authenticity_token = html.Substring(start, end - start);
+
+				string	cookies = w.GetResponseHeader("Set-Cookie");
+				start = "_genesis_auth_frontend_session=".Length;
+				end = cookies.IndexOf("; path=");
+				_genesis_auth_frontend_session = cookies.Substring(start, end - start);
+
+				endpoint = w.url;
+			}
+
+			Dictionary<string, string>	post = new Dictionary<string, string>()
+			{
+				{ "utf8", "✓" },
+				{ "_method", "put" },
+				{ "authenticity_token", authenticity_token },
+				{ "conversations_create_session_form[email]", username },
+				{ "conversations_create_session_form[password]", password },
+				{ "conversations_create_session_form[remember_me]", "true" },
+				{ "commit", "Sign in" }
+			};
+
+			// Sign in and extract the redirection URL.
+			using (UnityWebRequest w = UnityWebRequest.Post(endpoint, post))
+			{
+				w.SetRequestHeader("Cookie", "_genesis_auth_frontend_session=" + _genesis_auth_frontend_session + "; path=/; secure; HttpOnly");
+
+				w.SendWebRequest();
+
+				while (w.isDone == false);
+
+				string	html = w.downloadHandler.text;
+				int		start = html.IndexOf("window.location.href = \"");
+				Debug.Assert(start != -1, "\"window.location.href\" was not found.");
+
+				start += "window.location.href = \"".Length;
+				int	end = html.IndexOf('"', start);
+				endpoint = html.Substring(start, end - start);
+			}
+
+			// Extract cookies kharma_session & kharma_token.
+			using (UnityWebRequest w = UnityWebRequest.Get(endpoint))
+			{
+				w.redirectLimit = 0;
+
+				w.SendWebRequest();
+
+				while (w.isDone == false);
+
+				string	cookies = w.GetResponseHeader("Set-Cookie");
+				string	cookieName = "kharma_token=";
+				int		start = cookies.IndexOf(cookieName);
+				Debug.Assert(start != -1, cookieName + " was not found.");
+
+				start += cookieName.Length;
+				int		end = cookies.IndexOf(';', start);
+				string	kharma_token = cookies.Substring(start, end - start);
+
+				cookieName = "kharma_session=";
+				start = cookies.IndexOf(cookieName);
+				Debug.Assert(start != -1, cookieName + " was not found.");
+
+				start += cookieName.Length;
+				end = cookies.IndexOf(';', start);
+				string	kharma_session = cookies.Substring(start, end - start);
+
+				this.session.xunitysession = kharma_session;
+				this.session.kharma_token = kharma_token;
+			}
 		}
 
 		private void	HandleRequest(HttpWebRequest request, int requestHash, Action<HttpWebResponse, string> onCompleted)

@@ -76,14 +76,15 @@ namespace NGPublisher
 					[Serializable]
 					public class Vetting
 					{
-						public int		id;
-						public string	status;
-						public bool		allow_edit;
+						// Default value required, because Unity can discard it.
+						public int		id = 0;
+						public string	status = string.Empty;
+						public bool		allow_edit = true;
 						//public string	genesis_vetting_id; // Unused
-						public string	platforms;
-						public string	unity_versions;
-						public string	srp_type;
-						public string[]	dependencies;
+						public string	platforms = string.Empty;
+						public string	unity_versions = string.Empty;
+						public string	srp_type = string.Empty;
+						public string[]	dependencies = new string[0];
 
 						public override int	GetHashCode()
 						{

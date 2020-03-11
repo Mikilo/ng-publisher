@@ -47,5 +47,7 @@ namespace NGPublisher
 		//public string	rounding; // Unused
 		//public bool		v2editor_preferred; // Unused
 		//public bool		v2_preferred; // Unused
+
+		public string	kharma_token; // Custom
 	}
 }

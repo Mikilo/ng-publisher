@@ -36,6 +36,17 @@ namespace NGPublisher
 
 			if (i != -1)
 			{
+				//StringBuilder	buffer = Utility.GetBuffer(input);
+
+				// Gross replace & restore of JSON. If there is more than errors/status, this won't work.
+				//buffer.Replace("\",\"", "<br><br>[");
+				//buffer.Replace("\":\"", "]<br>");
+				//buffer.Replace("\"errors\":{\"", "\"errors\":{\"error\":\"[");
+				//buffer.Replace("\"status]<br>", "\"status\":\"");
+
+				//return Utility.ReturnBuffer(buffer);
+
+				// Keep this one around in case.
 				if (i != -1)
 				{
 					StringBuilder	buffer = Utility.GetBuffer(input);
