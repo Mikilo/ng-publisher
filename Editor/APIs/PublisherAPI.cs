@@ -1,9 +1,11 @@
 ﻿using NGToolsStandalone_For_NGPublisher;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Net;
+using System.Reflection;
 using System.Text;
 using UnityEditor;
 using UnityEditorInternal;
@@ -14,16 +16,30 @@ namespace NGPublisher
 {
 	using NGToolsStandalone_For_NGPublisherEditor;
 
+	[AssemblyVerifier]
 	public class PublisherAPI : IPublisherAPI
 	{
+		private class TwoFactorAuthParameters
+		{
+			public string	url;
+			public string	authenticity_token;
+		}
+
 		public const string	Host = "publisher.assetstore.unity3d.com";
 		public const string	EndPoint = "https://" + PublisherAPI.Host + "/";
 
-		public bool		IsConnected { get { return this.session != null && string.IsNullOrEmpty(this.session.xunitysession) == false; } }
-		public Session	Session { get { return this.session; } }
+		private static Type			UnityConnectType = AssemblyVerifier.TryGetType(typeof(Editor).Assembly, "UnityEditor.Connect.UnityConnect");
+		private static MethodInfo	GetAccessTokenMethod = AssemblyVerifier.TryGetMethod(PublisherAPI.UnityConnectType, "GetAccessToken", BindingFlags.Instance | BindingFlags.Public);
+		private static PropertyInfo	instanceProperty = AssemblyVerifier.TryGetProperty(PublisherAPI.UnityConnectType, "instance", BindingFlags.Static | BindingFlags.Public);
 
-		private Session			session;
-		private HashSet<int>	runningRequests = new HashSet<int>();
+		public bool		IsConnected { get { return this.session != null && string.IsNullOrEmpty(this.session.xunitysession) == false && string.IsNullOrEmpty(this.session.kharma_token) == false; } }
+		public Session	Session { get { return this.session; } }
+		public bool		WaitingTFACode { get { return this.TFAParameters != null; } }
+
+		private TwoFactorAuthParameters	TFAParameters;
+
+		private Session		session;
+		private List<int>	runningRequests = new List<int>();
 
 		public	PublisherAPI(Session session)
 		{
@@ -36,6 +52,64 @@ namespace NGPublisher
 			lock (this.runningRequests)
 			{
 				return this.runningRequests.Contains("https://kharma.unity3d.com/login".GetHashCode());
+			}
+		}
+
+		public void	ConnectViaUnity(Action<HttpWebResponse, string> onCompleted)
+		{
+			if (PublisherAPI.instanceProperty != null &&
+				PublisherAPI.GetAccessTokenMethod != null)
+			{
+				string			endpoint = "https://kharma.unity3d.com/login";
+				HttpWebRequest	request = this.CreateRequest(endpoint);
+				StringBuilder	buffer = Utility.GetBuffer();
+
+				buffer.Append("user_access_token=");
+				buffer.Append((string)GetAccessTokenMethod.Invoke(instanceProperty.GetValue(null), null));
+				buffer.Append("&unityversion=");
+				buffer.Append(PublisherAPI.UrlEncode(Application.unityVersion));
+				buffer.Append("&toolversion=");
+				buffer.Append(PublisherAPI.UrlEncode("V5.0.2"));
+				buffer.Append("&license_hash=");
+				buffer.Append(PublisherAPI.UrlEncode(this.GetLicenseHash()));
+				buffer.Append("&hardware_hash=");
+				buffer.Append(PublisherAPI.UrlEncode(this.GetHardwareHash()));
+
+				byte[]	content = Encoding.UTF8.GetBytes(Utility.ReturnBuffer(buffer));
+
+				request.Headers = new WebHeaderCollection();
+				request.Method = "POST";
+				request.ContentType = "application/x-www-form-urlencoded";
+				request.ContentLength = content.Length;
+				request.Accept = "application/json";
+				request.KeepAlive = true;
+				request.Host = "kharma.unity3d.com";
+				request.CookieContainer = new CookieContainer();
+
+				using (Stream stream = request.GetRequestStream())
+				{
+					stream.Write(content, 0, content.Length);
+				}
+
+				this.HandleRequest(request, endpoint.GetHashCode(), (r, s) =>
+				{
+					if (r == null)
+						onCompleted(r, s);
+					else
+					{
+						if (Conf.DebugMode == Conf.DebugState.Verbose)
+							Debug.Log(s);
+
+						if (s.Length > 0 && s[0] == '{')
+						{
+							this.session = JsonUtility.FromJson<Session>(s);
+							InternalNGDebug.Snapshot(this.session);
+							//Utility.StartBackgroundTask(this.FetchSessionAndToken(username, password), () => onCompleted(r, s));
+						}
+						else
+							onCompleted(r, s);
+					}
+				});
 			}
 		}
 
@@ -52,7 +126,7 @@ namespace NGPublisher
 			buffer.Append("&unityversion=");
 			buffer.Append(PublisherAPI.UrlEncode(Application.unityVersion));
 			buffer.Append("&toolversion=");
-			buffer.Append(PublisherAPI.UrlEncode("V4.1.0"));
+			buffer.Append(PublisherAPI.UrlEncode("V5.0.2"));
 			buffer.Append("&license_hash=");
 			buffer.Append(PublisherAPI.UrlEncode(this.GetLicenseHash()));
 			buffer.Append("&hardware_hash=");
@@ -77,8 +151,7 @@ namespace NGPublisher
 			this.HandleRequest(request, endpoint.GetHashCode(), (r, s) =>
 			{
 				if (r == null)
-				{
-				}
+					onCompleted(r, s);
 				else
 				{
 					if (Conf.DebugMode == Conf.DebugState.Verbose)
@@ -87,12 +160,112 @@ namespace NGPublisher
 					if (s.Length > 0 && s[0] == '{')
 					{
 						this.session = JsonUtility.FromJson<Session>(s);
-						this.FetchSessionAndToken(username, password);
+						Utility.StartBackgroundTask(this.FetchSessionAndToken(username, password), () => onCompleted(r, s));
 					}
+					else
+						onCompleted(r, s);
+				}
+			});
+		}
+
+		public void	ValidateTFACode(string code, Action<HttpWebResponse, string> onCompleted)
+		{
+			Dictionary<string, string>	post = new Dictionary<string, string>()
+			{
+				{ "utf8", "✓" },
+				{ "_method", "put" },
+				{ "authenticity_token", this.TFAParameters.authenticity_token },
+				{ "conversations_tfa_required_form[verify_code]", code },
+				{ "conversations_tfa_required_form[submit_verify_code]", "Verify" },
+				{ "commit", "Sign in" }
+			};
+
+			// Validate TFA code.
+			using (UnityWebRequest w = UnityWebRequest.Post(this.TFAParameters.url, post))
+			{
+				//w.SetRequestHeader("Cookie", "_genesis_auth_frontend_session=" + _genesis_auth_frontend_session + "; path=/; secure; HttpOnly");
+
+				//w.redirectLimit = 0;
+
+				w.SendWebRequest();
+
+				while (w.isDone == false);
+
+				string html = w.downloadHandler.text;
+				Debug.Log(html);
+
+				foreach (var item in w.GetResponseHeaders())
+					Debug.Log(item.Key + "=" + item.Value);
+				//string	cookies = w.GetResponseHeader("Set-Cookie");
+				//string	cookieName = "kharma_token=";
+				//int		start = cookies.IndexOf(cookieName);
+				//Debug.Assert(start != -1, cookieName + " was not found.");
+
+				//start += cookieName.Length;
+				//int		end = cookies.IndexOf(';', start);
+				//string	kharma_token = cookies.Substring(start, end - start);
+
+				//cookieName = "kharma_session=";
+				//start = cookies.IndexOf(cookieName);
+				//Debug.Assert(start != -1, cookieName + " was not found.");
+
+				//start += cookieName.Length;
+				//end = cookies.IndexOf(';', start);
+				//string	kharma_session = cookies.Substring(start, end - start);
+
+				//this.session.xunitysession = kharma_session;
+				//this.session.kharma_token = kharma_token;
+
+				//onCompleted(null, null);
+			}
+
+			this.TFAParameters = null;
+		}
+
+		public void	Use(string kharma_session, string kharma_token, Action<HttpWebResponse, string> onCompleted)
+		{
+			using (var request = UnityWebRequest.Get(PublisherAPI.EndPoint + "api/publisher/overview.json"))
+			{
+				request.SetRequestHeader("X-Requested-With", "XMLHttpRequest");
+				request.SetRequestHeader("X-Kharma-Token", kharma_token);
+				request.SetRequestHeader("Cookie", "kharma_session=" + kharma_session + "; kharma_token=" + kharma_token);
+
+				lock (this.runningRequests)
+				{
+					this.runningRequests.Add("https://kharma.unity3d.com/login".GetHashCode());
 				}
 
-				onCompleted(r, s);
-			});
+				request.SendWebRequest();
+
+				while (request.isDone == false);
+
+				if (request.HasError() == true)
+					Debug.LogError(request.error);
+				else
+				{
+					Publisher	publisher = JsonUtility.FromJson<Publisher>(request.downloadHandler.text);
+
+					this.session = new Session()
+					{
+						name = publisher.overview.name,
+						publisher = publisher.overview.id,
+						xunitysession = kharma_session,
+						kharma_token = Uri.UnescapeDataString(kharma_token),
+						keyimage = new Session.Keyimage()
+						{
+							icon = publisher.overview.keyimage.small_v2
+						}
+					};
+				}
+
+				lock (this.runningRequests)
+				{
+					this.runningRequests.Remove("https://kharma.unity3d.com/login".GetHashCode());
+				}
+
+				if (onCompleted != null)
+					onCompleted(null, request.downloadHandler.text);
+			}
 		}
 
 		public void	Disconnect()
@@ -193,6 +366,8 @@ namespace NGPublisher
 		{
 			string			endpoint = PublisherAPI.EndPoint + "api/management/draft/" + versionId + ".json";
 			HttpWebRequest	request = this.CreateRequest(endpoint);
+
+			request.Method = "POST";
 
 			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
 		}
@@ -324,7 +499,6 @@ namespace NGPublisher
 
 			byte[]	content = Encoding.ASCII.GetBytes(Utility.ReturnBuffer(buffer));
 
-			request.Headers = new WebHeaderCollection();
 			request.Method = "POST";
 			request.ContentLength = content.Length;
 			request.Accept = "application/json";
@@ -551,6 +725,109 @@ namespace NGPublisher
 			this.HandleRequest(request, endpoint.GetHashCode() + packageId, onCompleted);
 		}
 
+		public bool	IsCanSubmit(int versionId)
+		{
+			lock (this.runningRequests)
+			{
+				return this.runningRequests.Contains((PublisherAPI.EndPoint + "api/management/package-version/" + versionId + ".json").GetHashCode());
+			}
+		}
+
+		public void	CanSubmit(int versionId, string version, string publishnotes, int category_id, float price, Action<HttpWebResponse, string> onCompleted)
+		{
+			string			endpoint = PublisherAPI.EndPoint + "api/management/package-version/" + versionId + ".json";
+			HttpWebRequest	request = this.CreateRequest(endpoint);
+			StringBuilder	buffer = Utility.GetBuffer();
+
+			buffer.Append("{\"version_name\":\"");
+			buffer.Append(version);
+			buffer.Append("\",\"publishnotes\":\"");
+			buffer.Append(publishnotes.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n"));
+			buffer.Append("\",\"category_id\":\"");
+			buffer.Append(category_id);
+			buffer.Append("\",\"price\":\"");
+			buffer.Append(price.ToString("0.00", CultureInfo.InvariantCulture));
+			buffer.Append("\"}");
+
+			byte[]	content = Encoding.UTF8.GetBytes(Utility.ReturnBuffer(buffer));
+
+			request.Method = "POST";
+			request.ContentType = " application/json";
+			request.ContentLength = content.Length;
+
+			using (Stream stream = request.GetRequestStream())
+			{
+				stream.Write(content, 0, content.Length);
+			}
+
+			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
+		}
+
+		public bool	IsSubmitting(int versionId)
+		{
+			lock (this.runningRequests)
+			{
+				return this.runningRequests.Contains((PublisherAPI.EndPoint + "api/management/submit/" + versionId + ".json").GetHashCode());
+			}
+		}
+
+		public void	Submit(int versionId, bool autoPublish, string comments, Action<HttpWebResponse, string> onCompleted)
+		{
+			string			endpoint = PublisherAPI.EndPoint + "api/management/submit/" + versionId + ".json";
+			HttpWebRequest	request = this.CreateRequest(endpoint);
+			StringBuilder	buffer = Utility.GetBuffer();
+
+			buffer.Append("submit_message=");
+			buffer.Append(PublisherAPI.UrlEncode(comments));
+
+			if (autoPublish == true)
+				buffer.Append("&auto_publish=Y");
+
+			byte[]	content = Encoding.UTF8.GetBytes(Utility.ReturnBuffer(buffer));
+
+			request.Method = "POST";
+			request.ContentType = " application/x-www-form-urlencoded; charset=UTF-8";
+			request.ContentLength = content.Length;
+
+			using (Stream stream = request.GetRequestStream())
+			{
+				stream.Write(content, 0, content.Length);
+			}
+
+			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
+		}
+
+		public bool	IsPublishing(int versionId)
+		{
+			lock (this.runningRequests)
+			{
+				return this.runningRequests.Contains((PublisherAPI.EndPoint + "api/management/publish/" + versionId + ".json").GetHashCode());
+			}
+		}
+
+		public void	Publish(int versionId, string comments, Action<HttpWebResponse, string> onCompleted)
+		{
+			string			endpoint = PublisherAPI.EndPoint + "api/management/publish/" + versionId + ".json";
+			HttpWebRequest	request = this.CreateRequest(endpoint);
+			StringBuilder	buffer = Utility.GetBuffer();
+
+			buffer.Append("submit_message=");
+			buffer.Append(PublisherAPI.UrlEncode(comments));
+
+			byte[]	content = Encoding.UTF8.GetBytes(Utility.ReturnBuffer(buffer));
+
+			request.Method = "POST";
+			request.ContentType = " application/x-www-form-urlencoded; charset=UTF-8";
+			request.ContentLength = content.Length;
+
+			using (Stream stream = request.GetRequestStream())
+			{
+				stream.Write(content, 0, content.Length);
+			}
+
+			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
+		}
+
 		public bool	IsGettingPeriods(int publisherId)
 		{
 			lock (this.runningRequests)
@@ -594,7 +871,6 @@ namespace NGPublisher
 		public void	GetFreeDownloads(int publisherId, int periodId, Action<HttpWebResponse, string> onCompleted)
 		{
 			string			endpoint = PublisherAPI.EndPoint + "api/publisher-info/downloads/" + publisherId + "/" + periodId + ".json?package_filter=all";
-			Debug.Log(endpoint);
 			HttpWebRequest	request = this.CreateRequest(endpoint);
 
 			this.HandleRequest(request, endpoint.GetHashCode(), onCompleted);
@@ -821,7 +1097,7 @@ namespace NGPublisher
 
 			request.CookieContainer = new CookieContainer();
 
-			if (this.session != null)
+			if (this.IsConnected == true)
 			{
 				try
 				{
@@ -850,94 +1126,214 @@ namespace NGPublisher
 			return request;
 		}
 
-		private void	FetchSessionAndToken(string username, string password)
+		private IEnumerator	FetchSessionAndToken(string username, string password)
 		{
-			ServicePointManager.ServerCertificateValidationCallback = (a, b, c, d) => true;
-
-			string	endpoint = "https://publisher.assetstore.unity3d.com/sales.html";
-			string	authenticity_token;
-			string	_genesis_auth_frontend_session;
-
-			// Request the authenticity_token from any page.
-			using (UnityWebRequest w = UnityWebRequest.Get(endpoint))
+			lock (this.runningRequests)
 			{
-				w.SendWebRequest();
-
-				while (w.isDone == false);
-
-				string	html = w.downloadHandler.text;
-				int		start = html.IndexOf("<input type=\"hidden\" name=\"authenticity_token\" value=\"");
-				Debug.Assert(start != -1, "Input \"authenticity_token\" not found.");
-
-				start += "<input type=\"hidden\" name=\"authenticity_token\" value=\"".Length;
-				int	end = html.IndexOf('"', start);
-				authenticity_token = html.Substring(start, end - start);
-
-				string	cookies = w.GetResponseHeader("Set-Cookie");
-				start = "_genesis_auth_frontend_session=".Length;
-				end = cookies.IndexOf("; path=");
-				_genesis_auth_frontend_session = cookies.Substring(start, end - start);
-
-				endpoint = w.url;
+				this.runningRequests.Add("https://kharma.unity3d.com/login".GetHashCode());
 			}
 
-			Dictionary<string, string>	post = new Dictionary<string, string>()
+			try
 			{
-				{ "utf8", "✓" },
-				{ "_method", "put" },
-				{ "authenticity_token", authenticity_token },
-				{ "conversations_create_session_form[email]", username },
-				{ "conversations_create_session_form[password]", password },
-				{ "conversations_create_session_form[remember_me]", "true" },
-				{ "commit", "Sign in" }
-			};
+				ServicePointManager.ServerCertificateValidationCallback = (a, b, c, d) => true;
 
-			// Sign in and extract the redirection URL.
-			using (UnityWebRequest w = UnityWebRequest.Post(endpoint, post))
-			{
-				w.SetRequestHeader("Cookie", "_genesis_auth_frontend_session=" + _genesis_auth_frontend_session + "; path=/; secure; HttpOnly");
+				UnityWebRequest.ClearCookieCache(new Uri("https://publisher.assetstore.unity3d.com/sales.html"));
 
-				w.SendWebRequest();
+				string	endpoint = "https://publisher.assetstore.unity3d.com/sales.html";
+				string	authenticity_token;
+				string	_genesis_auth_frontend_session;
+				int		start;
+				int		end;
+				string	html;
 
-				while (w.isDone == false);
+				// Request the authenticity_token from any page.
+				using (UnityWebRequest w = UnityWebRequest.Get(endpoint))
+				{
+					w.SendWebRequest();
 
-				string	html = w.downloadHandler.text;
-				int		start = html.IndexOf("window.location.href = \"");
+					while (w.isDone == false)
+						yield return null;
+
+					//Debug.Log(w.responseCode);
+					//Debug.Log(w.isHttpError);
+					//Debug.Log(w.isNetworkError);
+					//Debug.Log(w.error);
+
+					//foreach (var item in w.GetResponseHeaders())
+					//	Debug.Log(item.Key + "=" + item.Value);
+
+					html = w.downloadHandler.text;
+					//Debug.Log(html);
+
+					//start = html.IndexOf("<input type=\"hidden\" name=\"authenticity_token\" value=\"");
+					//Debug.Assert(start != -1, "Input \"authenticity_token\" not found.");
+
+					//start += "<input type=\"hidden\" name=\"authenticity_token\" value=\"".Length;
+					//end = html.IndexOf('"', start);
+					//authenticity_token = html.Substring(start, end - start);
+					//Debug.Log("authenticity_token="+ authenticity_token);
+
+					const string	refreshHeader = "http-equiv=\"refresh\" content=\"1; url=";
+
+					start = html.IndexOf(refreshHeader);
+
+					if (start != -1)
+					{
+						start += refreshHeader.Length;
+						end = html.IndexOf("\"", start + 1);
+
+						endpoint = html.Substring(start, end);
+						Debug.Log(endpoint);
+
+						using (UnityWebRequest w2 = UnityWebRequest.Get(endpoint))
+						{
+							w2.SendWebRequest();
+
+							while (w2.isDone == false)
+								yield return null;
+
+							Debug.Log(w2.responseCode);
+							Debug.Log(w2.isHttpError);
+							Debug.Log(w2.isNetworkError);
+							Debug.Log(w2.error);
+
+							foreach (var item in w2.GetResponseHeaders())
+								Debug.Log(item.Key + "=" + item.Value);
+
+							html = w2.downloadHandler.text;
+							Debug.Log(html);
+						}
+					}
+
+					start = html.IndexOf("<meta name=\"csrf-token\" content=\"");
+					Debug.Assert(start != -1, "Input \"authenticity_token\" not found.");
+
+					start += "<meta name=\"csrf-token\" content=\"".Length;
+					end = html.IndexOf('"', start);
+					authenticity_token = html.Substring(start, end - start);
+					//Debug.Log("authenticity_token="+ authenticity_token);
+
+					string	cookies = w.GetResponseHeader("Set-Cookie");
+					start = "_genesis_auth_frontend_session=".Length;
+					end = cookies.IndexOf("; path=");
+					_genesis_auth_frontend_session = cookies.Substring(start, end - start);
+					//Debug.Log("cookies=" + cookies);
+					//Debug.Log("_genesis_auth_frontend_session=" + _genesis_auth_frontend_session);
+
+					endpoint = w.url;
+				}
+
+				ServicePointManager.ServerCertificateValidationCallback = (a, b, c, d) => true;
+
+				WebRequest	rq = WebRequest.Create(endpoint);
+
+				rq.Method = "POST";
+
+				string	post = string.Format("utf8=%E2%9C%93&_method=put&authenticity_token=" + System.Net.WebUtility.UrlEncode(authenticity_token) + "&conversations_create_session_form%5Bemail%5D=mikil0%40yahoo.fr&conversations_create_session_form%5Bpassword%5D=k3RbsodwU&conversations_create_session_form%5Bremember_me%5D=false&commit=Sign+in");
+				byte[]	data = Encoding.ASCII.GetBytes(post);
+
+				rq.ContentType = "application/x-www-form-urlencoded";
+				rq.ContentLength = data.Length;
+
+				rq.Headers.Add("Cookie", "_genesis_auth_frontend_session=" + _genesis_auth_frontend_session);
+
+				using (Stream stream = rq.GetRequestStream())
+				{
+					stream.Write(data, 0, data.Length);
+				}
+
+				try
+				{
+					using (HttpWebResponse response = (HttpWebResponse)rq.GetResponse())
+					using (StreamReader readStream = new StreamReader(response.GetResponseStream(), Encoding.ASCII))
+					{
+						html = readStream.ReadToEnd();
+					}
+				}
+				catch (Exception ex)
+				{
+					Debug.LogException(ex);
+				}
+
+				if (html.Contains("tfa_required") == true)
+				{
+					//Debug.Log("_genesis_auth_frontend_session="+_genesis_auth_frontend_session);
+					//Debug.Log(html);
+
+					start = html.IndexOf("<input type=\"hidden\" name=\"authenticity_token\" value=\"");
+					Debug.Assert(start != -1, "Input \"authenticity_token\" not found.");
+
+					start += "<input type=\"hidden\" name=\"authenticity_token\" value=\"".Length;
+					end = html.IndexOf('"', start);
+					authenticity_token = html.Substring(start, end - start);
+
+					//Debug.Log("endpoint=" + endpoint);
+					//Debug.Log("authenticity_token="+authenticity_token);
+					this.TFAParameters = new TwoFactorAuthParameters()
+					{
+						url = endpoint,
+						authenticity_token = authenticity_token
+					};
+
+					lock (this.runningRequests)
+					{
+						Debug.Log("Remove FetchSessionAndToken " + "https://kharma.unity3d.com/login".GetHashCode());
+						this.runningRequests.Remove("https://kharma.unity3d.com/login".GetHashCode());
+					}
+
+					yield break;
+				}
+
+				start = html.IndexOf("window.location.href = \"");
 				Debug.Assert(start != -1, "\"window.location.href\" was not found.");
+				//Debug.Log(html);
 
 				start += "window.location.href = \"".Length;
-				int	end = html.IndexOf('"', start);
+				end = html.IndexOf('"', start);
 				endpoint = html.Substring(start, end - start);
+				//Debug.Log("endpoint=" + endpoint);
+
+				// Extract cookies kharma_session & kharma_token.
+				using (UnityWebRequest w = UnityWebRequest.Get(endpoint))
+				{
+					w.redirectLimit = 0;
+
+					w.SendWebRequest();
+
+					while (w.isDone == false)
+						yield return null;
+
+					string	cookies = w.GetResponseHeader("Set-Cookie");
+					string	cookieName = "kharma_token=";
+					start = cookies.IndexOf(cookieName);
+					Debug.Assert(start != -1, cookieName + " was not found.");
+
+					start += cookieName.Length;
+					end = cookies.IndexOf(';', start);
+					string	kharma_token = cookies.Substring(start, end - start);
+
+					cookieName = "kharma_session=";
+					start = cookies.IndexOf(cookieName);
+					Debug.Assert(start != -1, cookieName + " was not found.");
+
+					start += cookieName.Length;
+					end = cookies.IndexOf(';', start);
+					string	kharma_session = cookies.Substring(start, end - start);
+
+					// Ensure main thread.
+					EditorApplication.delayCall += () =>
+					{
+						this.session.xunitysession = kharma_session;
+						this.session.kharma_token = Uri.UnescapeDataString(kharma_token);
+					};
+				}
 			}
-
-			// Extract cookies kharma_session & kharma_token.
-			using (UnityWebRequest w = UnityWebRequest.Get(endpoint))
+			finally
 			{
-				w.redirectLimit = 0;
-
-				w.SendWebRequest();
-
-				while (w.isDone == false);
-
-				string	cookies = w.GetResponseHeader("Set-Cookie");
-				string	cookieName = "kharma_token=";
-				int		start = cookies.IndexOf(cookieName);
-				Debug.Assert(start != -1, cookieName + " was not found.");
-
-				start += cookieName.Length;
-				int		end = cookies.IndexOf(';', start);
-				string	kharma_token = cookies.Substring(start, end - start);
-
-				cookieName = "kharma_session=";
-				start = cookies.IndexOf(cookieName);
-				Debug.Assert(start != -1, cookieName + " was not found.");
-
-				start += cookieName.Length;
-				end = cookies.IndexOf(';', start);
-				string	kharma_session = cookies.Substring(start, end - start);
-
-				this.session.xunitysession = kharma_session;
-				this.session.kharma_token = kharma_token;
+				lock (this.runningRequests)
+				{
+					this.runningRequests.Remove("https://kharma.unity3d.com/login".GetHashCode());
+				}
 			}
 		}
 

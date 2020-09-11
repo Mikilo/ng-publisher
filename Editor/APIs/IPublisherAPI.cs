@@ -8,9 +8,13 @@ namespace NGPublisher
 	{
 		bool	IsConnected { get; }
 		Session	Session { get; }
+		bool	WaitingTFACode { get; }
 
 		bool	IsConnecting();
+		void	ConnectViaUnity(Action<HttpWebResponse, string> onCompleted);
 		void	Connect(string username, string password, Action<HttpWebResponse, string> onCompleted);
+		void	ValidateTFACode(string code, Action<HttpWebResponse, string> onCompleted);
+		void	Use(string kharma_session, string kharma_token, Action<HttpWebResponse, string> onCompleted);
 		void	Disconnect();
 
 		bool	IsGettingAllPackages();
@@ -60,6 +64,15 @@ namespace NGPublisher
 
 		bool	IsCreatingVoucher(int publisherId, int packageId);
 		void	CreateVoucher(int publisherId, int packageId, Action<HttpWebResponse, string> onCompleted);
+
+		bool	IsCanSubmit(int versionId);
+		void	CanSubmit(int versionId, string version, string publishnotes, int category_id, float price, Action<HttpWebResponse, string> onCompleted);
+
+		bool	IsSubmitting(int versionId);
+		void	Submit(int versionId, bool autoPublish, string comments, Action<HttpWebResponse, string> onCompleted);
+
+		bool	IsPublishing(int versionId);
+		void	Publish(int versionId, string comments, Action<HttpWebResponse, string> onCompleted);
 
 		bool	IsGettingPeriods(int publisherId);
 		void	GetPeriods(int publisherId, Action<HttpWebResponse, string> onCompleted);

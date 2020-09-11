@@ -339,7 +339,9 @@ namespace NGPublisher
 		public enum MainTab
 		{
 			Packages,
-			Sales
+			Sales,
+			Submit,
+			Publish
 		}
 
 		public enum LanguageTab
@@ -389,28 +391,17 @@ namespace NGPublisher
 			}
 		};
 
-		private static Texture2D	loopIcon;
-		private static Texture2D	LoopIcon
-		{
-			get
-			{
-				if (NGPublisherWindow.loopIcon == null)
-				{
-					GUIStyle	style = GUI.skin.FindStyle("Icon.ExtrapolationLoop");
+		private static readonly char[]	Extensions = new char[] { 'a', 'b', 'f', 'r', 'p', 'x' };
 
-					if (style != null)
-						NGPublisherWindow.loopIcon = style.normal.background;
-					else
-						NGPublisherWindow.loopIcon = Texture2D.blackTexture;
-				}
-				return NGPublisherWindow.loopIcon;
-			}
-		}
 		private static GUIContent	applyContent = new GUIContent("✔", "Apply changes");
 
 		public string	username = string.Empty;
 		[NonSerialized]
 		public string	password = string.Empty;
+		[NonSerialized]
+		public string	TFACode = string.Empty;
+		public string	kharma_session = string.Empty;
+		public string	kharma_token = string.Empty;
 		public Session	lastSession;
 
 		public int			selectedPackage;
@@ -433,6 +424,9 @@ namespace NGPublisher
 		private Package					targetHighlightPackage;
 		private BgColorContentAnimator	targetHighlightPackageAnim;
 
+		private Vector2	submitScrollPosition;
+		private Vector2	publishScrollPosition;
+
 		private Dictionary<object, object>	modifiedValues = new Dictionary<object, object>();
 
 		[NonSerialized]
@@ -444,6 +438,7 @@ namespace NGPublisher
 
 		private bool		displayPublishNotes;
 
+		private Vector2				salesScrollPosition;
 		private bool				editExport = false;
 		[NonSerialized]
 		private string				exportLabel;
@@ -460,6 +455,9 @@ namespace NGPublisher
 		private bool			displaySales = true;
 		private bool			displayDownloads = true;
 		private QueueRoutine	exportRoutine;
+
+		[NonSerialized]
+		private float	restoreOffset;
 
 		private ErrorPopup		errorPopup = new ErrorPopup(NGPublisherWindow.Title, "An error occurred. Try to reopen " + NGPublisherWindow.Title + ".");
 		private MessageCenter	messageCenter = new MessageCenter();
@@ -600,7 +598,7 @@ namespace NGPublisher
 				{
 					Utility.content.text = this.publisherAPI.Session.name + " (" + this.publisherAPI.Session.publisher + ")";
 					Utility.content.image = TextureCache.Get(this.publisherAPI.Session.keyimage.icon);
-					GUILayout.Label(Utility.content, GeneralStyles.Title1);
+					GUILayout.Label(Utility.content, GeneralStyles.Title1, GUILayoutOptionPool.Height(32F));
 
 					GUILayout.FlexibleSpace();
 
@@ -623,9 +621,9 @@ namespace NGPublisher
 						if (isGettingPackages == true)
 							Utility.content.image = GeneralStyles.StatusWheel.image;
 						else
-							Utility.content.image = NGPublisherWindow.LoopIcon;
+							Utility.content.image = UtilityResources.Refresh;
 
-						if (GUILayout.Button(Utility.content) == true)
+						if (GUILayout.Button(Utility.content, GUILayoutOptionPool.Height(18F)) == true)
 						{
 							this.database.RequestAllPackages(this.publisherAPI, this.HandleErrorOnly);
 							return;
@@ -657,6 +655,10 @@ namespace NGPublisher
 					this.OnGUIMainPackages();
 				else if (this.mainTab == MainTab.Sales)
 					this.OnGUIMainSales();
+				else if (this.mainTab == MainTab.Submit)
+					this.OnGUISubmit();
+				else if (this.mainTab == MainTab.Publish)
+					this.OnGUIPublish();
 			}
 			catch (ExitGUIException)
 			{
@@ -665,6 +667,365 @@ namespace NGPublisher
 			catch (Exception ex)
 			{
 				this.errorPopup.error = ex;
+			}
+		}
+
+		private void	OnGUIPublish()
+		{
+			EditorGUILayout.HelpBox("Publishing a version is not instant and might take a moment before being effective.", MessageType.Info);
+
+			bool	hasPendingReviews = false;
+			bool	isGettingVersion = false;
+			Rect	canPublishAll = GUILayoutUtility.GetRect(0F, 24F);
+			canPublishAll.xMin = canPublishAll.xMax - 150F;
+			canPublishAll.x -= 10F;
+			canPublishAll.height = 20F;
+
+			using (var scroll = new EditorGUILayout.ScrollViewScope(this.publishScrollPosition))
+			{
+				this.publishScrollPosition = scroll.scrollPosition;
+
+				for (int i = 0, max = this.database.Packages.Length; i < max; ++i)
+				{
+					Package	package = this.database.Packages[i];
+
+					for (int j = 0, max2 = package.versions.Length; j < max2; ++j)
+					{
+						Version	version = package.versions[j];
+
+						if (version.detailed == null)
+						{
+							isGettingVersion = isGettingVersion == true || this.publisherAPI.IsGettingPackageVersion(version.id);
+
+							if (isGettingVersion == false)
+							{
+								this.database.RequestGetPackageVersion(this.publisherAPI, version, this.HandleErrorOnly);
+								isGettingVersion = true;
+							}
+						}
+						else if (version.detailed.allow_publish == true)
+						{
+							hasPendingReviews = true;
+
+							Rect	r = GUILayoutUtility.GetRect(0F, 24F + 4F, GUILayoutOptionPool.ExpandWidthTrue);
+
+							r.x += 4F;
+							r.width -= 8F;
+							r.height -= 4F;
+							this.Box(r, GUIContent.none);
+
+							r.x += 4F;
+							r.width -= 8F;
+							float	w = r.width;
+
+							Utility.content.text = version.name;
+							r.y += 4F;
+							r.height = 16F;
+							r.width = GUI.skin.button.CalcSize(Utility.content).x;
+							if (GUI.Button(r, Utility.content) == true)
+							{
+								this.mainTab = MainTab.Packages;
+								this.selectedPackage = i;
+								this.selectedVersion = j;
+								this.selectedLanguage = null;
+							}
+							r.width = w;
+
+							r.x = r.xMax - 80F - 10F - 80F - 10F - 100F - 4F;
+							r.width = 80F;
+
+							var	version_name = this.Edit(r, version.id + "version_name".GetHashCode(), version.version_name);
+							r.x += r.width + 10F;
+							var	price = this.Edit(r, version.id + "price".GetHashCode(), version.price);
+
+							using (LabelWidthRestorer.Get(13F))
+							{
+								Utility.content.text = "V";
+								Utility.content.tooltip = "Version name";
+								this.Box(version_name.Rect, GUIContent.none);
+								EditorGUI.TextField(version_name.Rect, Utility.content, version.version_name, EditorStyles.label);
+
+								Utility.content.text = "$";
+								Utility.content.tooltip = "Price";
+								this.Box(price.Rect, GUIContent.none);
+								EditorGUI.FloatField(price.Rect, Utility.content, version.price, EditorStyles.label);
+							}
+
+							bool	isPublishing = this.publisherAPI.IsPublishing(version.id) == true;
+
+							using (new EditorGUI.DisabledScope(isPublishing))
+							{
+								r.x += r.width + 10F;
+								r.width = 100F;
+								if (GUI.Button(r, "Publish") == true)
+								{
+									version.RequestPublish(this.publisherAPI, string.Empty, response =>
+									{
+										if (this.CheckRequestResponse(response) == true)
+										{
+											Version	v = response.context as Version;
+											Package	p = v.package;
+
+											for (int k = 0, max3 = p.versions.Length; k < max3; ++k)
+											{
+												if (p.versions[k] == v)
+												{
+													List<Version>	list = new List<Version>(p.versions);
+													list.Remove(v);
+													p.versions = list.ToArray();
+													break;
+												}
+											}
+										}
+
+										this.Repaint();
+									});
+
+									return;
+								}
+
+								if (isPublishing == true)
+								{
+									GUI.Label(r, GeneralStyles.StatusWheel);
+									this.Repaint();
+								}
+							}
+						}
+					}
+				}
+
+				Utility.content.tooltip = null;
+
+				if (hasPendingReviews == false)
+					EditorGUILayout.HelpBox("No pending review available for submission.", MessageType.Info);
+
+				if (isGettingVersion == true)
+				{
+					Utility.content.text = "Loading pending reviews...";
+					Utility.content.image = GeneralStyles.StatusWheel.image;
+					GUILayout.Label(Utility.content);
+					Utility.content.image = null;
+
+					this.Repaint();
+				}
+			}
+
+			using (new EditorGUI.DisabledScope(hasPendingReviews == false || isGettingVersion == true))
+			{
+				if (GUI.Button(canPublishAll, "Publish All") == true && EditorUtility.DisplayDialog(NGPublisherWindow.Title, "Confirm publishing all?", "Yes", "No") == true)
+				{
+					for (int i = 0, max = this.database.Packages.Length; i < max; ++i)
+					{
+						Package	package = this.database.Packages[i];
+
+						for (int j = 0, max2 = package.versions.Length; j < max2; ++j)
+						{
+							Version	version = package.versions[j];
+
+							if (version.detailed != null && version.detailed.allow_publish == true)
+							{
+								version.RequestPublish(this.publisherAPI, string.Empty, response =>
+								{
+									if (this.CheckRequestResponse(response) == true)
+									{
+										Version	v = response.context as Version;
+										Package	p = v.package;
+
+										for (int k = 0, max3 = p.versions.Length; k < max3; ++k)
+										{
+											if (p.versions[k] == v)
+											{
+												List<Version>	list = new List<Version>(p.versions);
+												list.Remove(v);
+												p.versions = list.ToArray();
+												break;
+											}
+										}
+									}
+
+									this.Repaint();
+								});
+
+								break;
+							}
+						}
+					}
+				}
+			}
+		}
+
+		private void	OnGUISubmit()
+		{
+			using (var scroll = new EditorGUILayout.ScrollViewScope(this.submitScrollPosition))
+			{
+				this.submitScrollPosition = scroll.scrollPosition;
+
+				bool	hasDraft = false;
+				bool	isGettingVersion = false;
+
+				for (int i = 0, max = this.database.Packages.Length; i < max; ++i)
+				{
+					Package	package = this.database.Packages[i];
+
+					for (int j = 0, max2 = package.versions.Length; j < max2; ++j)
+					{
+						Version	version = package.versions[j];
+
+						if (version.detailed == null)
+						{
+							isGettingVersion = isGettingVersion == true || this.publisherAPI.IsGettingPackageVersion(version.id);
+
+							if (isGettingVersion == false)
+							{
+								this.database.RequestGetPackageVersion(this.publisherAPI, version, this.HandleErrorOnly);
+								isGettingVersion = true;
+							}
+						}
+						else if (version.detailed.allow_submit == true)
+						{
+							hasDraft = true;
+
+							Rect	r = GUILayoutUtility.GetRect(0F, 24F + 4F, GUILayoutOptionPool.ExpandWidthTrue);
+
+							r.x += 4F;
+							r.width -= 8F;
+							r.height -= 4F;
+							this.Box(r, GUIContent.none);
+
+							r.x += 4F;
+							r.width -= 8F;
+							float	w = r.width;
+
+							Utility.content.text = version.name;
+							r.y += 4F;
+							r.height = 16F;
+							r.width = GUI.skin.button.CalcSize(Utility.content).x;
+							if (GUI.Button(r, Utility.content) == true)
+							{
+								this.mainTab = MainTab.Packages;
+								this.selectedPackage = i;
+								this.selectedVersion = j;
+								this.selectedLanguage = null;
+							}
+							r.width = w;
+
+							r.x = r.xMax - 80F - 10F - 80F - 10F - 100F - 4F;
+							r.width = 80F;
+
+							Rect	rApply = r;
+							rApply.y -= 1F;
+							rApply.x -= 50F + 4F;
+							rApply.width = 50F;
+
+							var	version_name = this.Edit(r, version.id + "version_name".GetHashCode(), version.version_name);
+							r.x += r.width + 10F;
+							var	price = this.Edit(r, version.id + "price".GetHashCode(), version.price);
+
+							using (LabelWidthRestorer.Get(13F))
+							{
+								Utility.content.text = "V";
+								Utility.content.tooltip = "Version name";
+								{
+									this.Box(version_name.Rect, GUIContent.none);
+									version_name.EndWithOutput = EditorGUI.TextField(version_name.Rect, Utility.content, version_name.BeginWithInput);
+								}
+
+								Utility.content.text = "$";
+								Utility.content.tooltip = "Price";
+								this.Box(price.Rect, GUIContent.none);
+								price.EndWithOutput = EditorGUI.FloatField(price.Rect, Utility.content, price.BeginWithInput);
+							}
+
+							bool	isSubmitting = this.publisherAPI.IsCanSubmit(version.id) == true || this.publisherAPI.IsSubmitting(version.id) == true;
+
+							using (new EditorGUI.DisabledScope(isSubmitting))
+							{
+								r.x += r.width + 10F;
+								r.width = 100F;
+								if (GUI.Button(r, "Submit") == true && (this.modifiedValues.Count == 0 || EditorUtility.DisplayDialog(NGPublisherWindow.Title, "You modified values and did not validate them.\n\nAre you sure you would like to submit?", "Submit", "Cancel") == true))
+								{
+									version.RequestCanSubmit(this.publisherAPI, response =>
+									{
+										if (this.CheckRequestResponse(response) == true)
+										{
+											SubmissionWindow.Start(version.name, (autoPublish, comments) =>
+											{
+												version.RequestSubmit(this.publisherAPI, autoPublish, comments, submissionResponse =>
+												{
+													if (this.CheckRequestResponse(submissionResponse) == true)
+													{
+														Version	v = submissionResponse.context as Version;
+														Package	p = v.package;
+
+														for (int k = 0, max3 = p.versions.Length; k < max3; ++k)
+														{
+															if (p.versions[k] == v)
+															{
+																List<Version>	list = new List<Version>(p.versions);
+																list.Remove(v);
+																p.versions = list.ToArray();
+																break;
+															}
+														}
+													}
+												});
+											});
+										}
+
+										this.Repaint();
+									});
+
+									return;
+								}
+
+								if (isSubmitting == true)
+								{
+									GUI.Label(r, GeneralStyles.StatusWheel);
+									this.Repaint();
+								}
+							}
+
+							if (version_name.Modified == true ||
+								price.Modified == true)
+							{
+								if (GUI.Button(rApply, NGPublisherWindow.applyContent, GeneralStyles.ToolbarValidButton) == true)
+								{
+									version.RequestSetPackage(this.publisherAPI,
+															  version_name.input,
+															  version.publishnotes,
+															  version.category_id,
+															  price.input,
+															  response =>
+									{
+										if (this.CheckRequestResponse(response) == true)
+										{
+											EditorGUIUtility.editingTextField = false;
+											version.version_name = version_name.Apply();
+											version.price = price.Apply();
+										}
+
+										this.Repaint();
+									});
+								}
+							}
+						}
+					}
+				}
+
+				Utility.content.tooltip = null;
+
+				if (hasDraft == false)
+					EditorGUILayout.HelpBox("No draft available for submission.", MessageType.Info);
+
+				if (isGettingVersion == true)
+				{
+					Utility.content.text = "Loading drafts...";
+					Utility.content.image = GeneralStyles.StatusWheel.image;
+					GUILayout.Label(Utility.content);
+					Utility.content.image = null;
+
+					this.Repaint();
+				}
 			}
 		}
 
@@ -702,9 +1063,9 @@ namespace NGPublisher
 					if (this.editExport == true)
 					{
 						GUILayout.Label("Export");
-						this.selectedAssetForExport = EditorGUILayout.Popup(this.selectedAssetForExport, this.assetsAsLabel, GUILayoutOptionPool.Width(100F));
+						this.selectedAssetForExport = NGEditorGUILayout.Popup(this.selectedAssetForExport, this.assetsAsLabel, GUILayoutOptionPool.Width(100F));
 						GUILayout.Label("to");
-						this.selectedExporter = EditorGUILayout.Popup(this.selectedExporter, this.exportersAsLabel, GUILayoutOptionPool.Width(50F));
+						this.selectedExporter = NGEditorGUILayout.Popup(this.selectedExporter, this.exportersAsLabel, GUILayoutOptionPool.Width(50F));
 						GUILayout.Label("since");
 						this.selectedPeriodForExport = NGEditorGUILayout.Popup(null, this.selectedPeriodForExport, this.database.Periods, p => p.name);
 
@@ -754,7 +1115,20 @@ namespace NGPublisher
 					if (this.database.Periods[0].value == DateTime.Now.Year * 100 + DateTime.Now.Month + 1 && this.publisherAPI.IsGettingPeriods(this.publisherAPI.Session.publisher) == false)
 						this.database.RequestPeriods(this.publisherAPI, this.HandleErrorOnly);
 
-					this.selectedPeriod = NGEditorGUILayout.Popup(null, this.selectedPeriod, this.database.Periods, p => p.name);
+					Utility.content.text = "Refresh";
+					Utility.content.image = UtilityResources.Refresh;
+					if (GUILayout.Button(Utility.content, GUILayoutOptionPool.Height(Constants.SingleLineHeight)) == true)
+					{
+						Period	period2 = this.database.Periods[this.selectedPeriod];
+
+						this.database.RequestSaleCounts(this.publisherAPI, period2, this.HandleErrorOnly);
+						this.database.RequestFreeDownloads(this.publisherAPI, period2, this.HandleErrorOnly);
+					}
+					Utility.content.image = null;
+
+					Rect	r = GUILayoutUtility.GetRect(80F, Constants.SingleLineHeight);
+					r.y += 3F;
+					this.selectedPeriod = NGEditorGUILayout.Popup(r, null, this.selectedPeriod, this.database.Periods, p => p.name);
 				}
 
 				Event	currentEvent = Event.current;
@@ -800,113 +1174,139 @@ namespace NGPublisher
 
 				EditorGUILayout.Space();
 
-				using (new EditorGUILayout.HorizontalScope())
+				using (var scroll = new EditorGUILayout.ScrollViewScope(this.salesScrollPosition))
 				{
-					if (GUILayout.Button("Refresh Current Month") == true)
-					{
-						this.database.RequestSaleCounts(this.publisherAPI, period, this.HandleErrorOnly);
-						this.database.RequestFreeDownloads(this.publisherAPI, period, this.HandleErrorOnly);
-					}
+					this.salesScrollPosition = scroll.scrollPosition;
 
-					GUILayout.FlexibleSpace();
-				}
-
-				this.displaySales = EditorGUILayout.Foldout(this.displaySales, "Sales", true);
-				if (this.displaySales == true)
-				{
-					if (isFetchingSaleCounts == true)
+					this.displaySales = EditorGUILayout.Foldout(this.displaySales, "Sales", true);
+					if (this.displaySales == true)
 					{
-						Utility.content.text = "Fetching sales...";
-						Utility.content.image = GeneralStyles.StatusWheel.image;
-						GUILayout.Label(Utility.content, GeneralStyles.BigCenterText);
-						Utility.content.image = null;
-						this.Repaint();
-					}
-
-					if (period.HasSales == true)
-					{
-						using (new EditorGUILayout.HorizontalScope())
+						if (isFetchingSaleCounts == true)
 						{
-							EditorGUILayout.LabelField("Package", EditorStyles.boldLabel, GUILayoutOptionPool.MaxWidth(200F));
-							EditorGUILayout.LabelField("Price", EditorStyles.boldLabel, GUILayoutOptionPool.Width(60F));
-							EditorGUILayout.LabelField("Qty", EditorStyles.boldLabel, GUILayoutOptionPool.Width(50F));
-							EditorGUILayout.LabelField("Refunds", EditorStyles.boldLabel, GUILayoutOptionPool.Width(60F));
-							EditorGUILayout.LabelField("Chargebacks", EditorStyles.boldLabel, GUILayoutOptionPool.Width(90F));
-							EditorGUILayout.LabelField("Gross", EditorStyles.boldLabel, GUILayoutOptionPool.Width(80F));
-							EditorGUILayout.LabelField("First", EditorStyles.boldLabel, GUILayoutOptionPool.Width(75F));
-							EditorGUILayout.LabelField("Last", EditorStyles.boldLabel, GUILayoutOptionPool.Width(75F));
+							Utility.content.text = "Fetching sales...";
+							Utility.content.image = GeneralStyles.StatusWheel.image;
+							GUILayout.Label(Utility.content, GeneralStyles.BigCenterText);
+							Utility.content.image = null;
+							this.Repaint();
 						}
 
-						for (int i = 0, max = period.Sales.Length; i < max; ++i)
+						if (period.HasSales == true)
 						{
-							Sale	sale = period.Sales[i];
+							float	maxPackageWidth = 0F;
+
+							if (period.HasSales == true)
+							{
+								for (int i = 0, max = period.Sales.Length; i < max; ++i)
+								{
+									Sale	sale = period.Sales[i];
+
+									Utility.content.text = sale.asset;
+									float	width = GeneralStyles.LeftButton.CalcSize(Utility.content).x;
+
+									if (maxPackageWidth < width)
+										maxPackageWidth = width;
+								}
+							}
 
 							using (new EditorGUILayout.HorizontalScope())
 							{
-								if (GUILayout.Button(sale.asset, GeneralStyles.LeftButton, GUILayoutOptionPool.MaxWidth(200F)) == true)
-									Application.OpenURL(sale.short_url);
+								EditorGUILayout.LabelField("Package", EditorStyles.boldLabel, GUILayoutOptionPool.MaxWidth(maxPackageWidth));
+								EditorGUILayout.LabelField("Price", EditorStyles.boldLabel, GUILayoutOptionPool.Width(60F));
+								EditorGUILayout.LabelField("Qty", EditorStyles.boldLabel, GUILayoutOptionPool.Width(50F));
+								EditorGUILayout.LabelField("Refunds", EditorStyles.boldLabel, GUILayoutOptionPool.Width(60F));
+								EditorGUILayout.LabelField("Chargebacks", EditorStyles.boldLabel, GUILayoutOptionPool.Width(90F));
+								EditorGUILayout.LabelField("Gross", EditorStyles.boldLabel, GUILayoutOptionPool.Width(80F));
+								EditorGUILayout.LabelField("First", EditorStyles.boldLabel, GUILayoutOptionPool.Width(75F));
+								EditorGUILayout.LabelField("Last", EditorStyles.boldLabel, GUILayoutOptionPool.Width(75F));
+							}
 
-								EditorGUILayout.TextField(sale.price, GUILayoutOptionPool.Width(60F));
-								EditorGUILayout.IntField(sale.quantity, GUILayoutOptionPool.Width(50F));
-								EditorGUILayout.IntField(sale.refunds, GUILayoutOptionPool.Width(60F));
-								EditorGUILayout.IntField(sale.chargebacks, GUILayoutOptionPool.Width(90F));
-								EditorGUILayout.TextField(sale.gross, GUILayoutOptionPool.Width(80F));
+							for (int i = 0, max = period.Sales.Length; i < max; ++i)
+							{
+								Sale	sale = period.Sales[i];
 
-								using (BgColorContentRestorer.Get(today == sale.first, Color.green))
+								using (new EditorGUILayout.HorizontalScope())
 								{
-									EditorGUILayout.TextField(sale.first, GUILayoutOptionPool.Width(75F));
-								}
+									if (GUILayout.Button(sale.asset, GeneralStyles.LeftButton, GUILayoutOptionPool.MaxWidth(maxPackageWidth)) == true)
+										Application.OpenURL(sale.short_url);
 
-								using (BgColorContentRestorer.Get(today == sale.last, Color.green))
-								{
-									EditorGUILayout.TextField(sale.last, GUILayoutOptionPool.Width(75F));
+									EditorGUILayout.TextField(sale.price, GUILayoutOptionPool.Width(60F));
+									EditorGUILayout.IntField(sale.quantity, GUILayoutOptionPool.Width(50F));
+									EditorGUILayout.IntField(sale.refunds, GUILayoutOptionPool.Width(60F));
+									EditorGUILayout.IntField(sale.chargebacks, GUILayoutOptionPool.Width(90F));
+									EditorGUILayout.TextField(sale.gross, GUILayoutOptionPool.Width(80F));
+
+									using (BgColorContentRestorer.Get(today == sale.first, Color.green))
+									{
+										EditorGUILayout.TextField(sale.first, GUILayoutOptionPool.Width(75F));
+									}
+
+									using (BgColorContentRestorer.Get(today == sale.last, Color.green))
+									{
+										EditorGUILayout.TextField(sale.last, GUILayoutOptionPool.Width(75F));
+									}
 								}
 							}
 						}
 					}
-				}
 
-				this.displayDownloads = EditorGUILayout.Foldout(this.displayDownloads, "Downloads", true);
-				if (this.displayDownloads == true)
-				{
-					if (isFetchingFreeDownloads == true)
+					this.displayDownloads = EditorGUILayout.Foldout(this.displayDownloads, "Downloads", true);
+					if (this.displayDownloads == true)
 					{
-						Utility.content.text = "Fetching downloads...";
-						Utility.content.image = GeneralStyles.StatusWheel.image;
-						GUILayout.Label(Utility.content, GeneralStyles.BigCenterText);
-						Utility.content.image = null;
-						this.Repaint();
-					}
-					
-					if (period.HasDownloads == true)
-					{
-						using (new EditorGUILayout.HorizontalScope())
+						if (isFetchingFreeDownloads == true)
 						{
-							EditorGUILayout.LabelField("Package", EditorStyles.boldLabel, GUILayoutOptionPool.MaxWidth(200F));
-							EditorGUILayout.LabelField("Qty", EditorStyles.boldLabel, GUILayoutOptionPool.Width(50F));
-							EditorGUILayout.LabelField("First", EditorStyles.boldLabel, GUILayoutOptionPool.Width(75F));
-							EditorGUILayout.LabelField("Last", EditorStyles.boldLabel, GUILayoutOptionPool.Width(75F));
+							Utility.content.text = "Fetching downloads...";
+							Utility.content.image = GeneralStyles.StatusWheel.image;
+							GUILayout.Label(Utility.content, GeneralStyles.BigCenterText);
+							Utility.content.image = null;
+							this.Repaint();
 						}
 
-						for (int i = 0, max = period.Downloads.Length; i < max; ++i)
+						if (period.HasDownloads == true)
 						{
-							Download	download = period.Downloads[i];
+							float	maxPackageWidth = 0F;
+
+							if (period.HasSales == true)
+							{
+								for (int i = 0, max = period.Downloads.Length; i < max; ++i)
+								{
+									Download	download = period.Downloads[i];
+
+									Utility.content.text = download.asset;
+									float	width = GeneralStyles.LeftButton.CalcSize(Utility.content).x;
+
+									if (maxPackageWidth < width)
+										maxPackageWidth = width;
+								}
+							}
 
 							using (new EditorGUILayout.HorizontalScope())
 							{
-								if (GUILayout.Button(download.asset, GeneralStyles.LeftButton, GUILayoutOptionPool.MaxWidth(200F)) == true)
-									Application.OpenURL(download.short_url);
+								EditorGUILayout.LabelField("Package", EditorStyles.boldLabel, GUILayoutOptionPool.MaxWidth(maxPackageWidth));
+								EditorGUILayout.LabelField("Qty", EditorStyles.boldLabel, GUILayoutOptionPool.Width(50F));
+								EditorGUILayout.LabelField("First", EditorStyles.boldLabel, GUILayoutOptionPool.Width(75F));
+								EditorGUILayout.LabelField("Last", EditorStyles.boldLabel, GUILayoutOptionPool.Width(75F));
+							}
 
-								EditorGUILayout.IntField(download.quantity, GUILayoutOptionPool.Width(50F));
+							for (int i = 0, max = period.Downloads.Length; i < max; ++i)
+							{
+								Download	download = period.Downloads[i];
 
-								using (BgColorContentRestorer.Get(today == download.first, Color.green))
+								using (new EditorGUILayout.HorizontalScope())
 								{
-									EditorGUILayout.TextField(download.first, GUILayoutOptionPool.Width(75F));
-								}
+									if (GUILayout.Button(download.asset, GeneralStyles.LeftButton, GUILayoutOptionPool.MaxWidth(maxPackageWidth)) == true)
+										Application.OpenURL(download.short_url);
 
-								using (BgColorContentRestorer.Get(today == download.last, Color.green))
-								{
-									EditorGUILayout.TextField(download.last, GUILayoutOptionPool.Width(75F));
+									EditorGUILayout.IntField(download.quantity, GUILayoutOptionPool.Width(50F));
+
+									using (BgColorContentRestorer.Get(today == download.first, Color.green))
+									{
+										EditorGUILayout.TextField(download.first, GUILayoutOptionPool.Width(75F));
+									}
+
+									using (BgColorContentRestorer.Get(today == download.last, Color.green))
+									{
+										EditorGUILayout.TextField(download.last, GUILayoutOptionPool.Width(75F));
+									}
 								}
 							}
 						}
@@ -921,6 +1321,29 @@ namespace NGPublisher
 
 			if (this.selectedPackage < 0 || this.selectedPackage >= this.database.Packages.Length)
 				return;
+
+			if (this.breadcrumbLeft == null)
+			{
+				this.breadcrumbLeft = new GUIStyle(UnityStyles.Breadcrumbleft);
+				this.breadcrumbLeft.padding = new RectOffset(10, 10, 0, 0);
+				this.breadcrumbLeft.stretchHeight = true;
+				this.breadcrumbLeft.alignment = TextAnchor.MiddleCenter;
+
+				this.breadcrumbMid = new GUIStyle(UnityStyles.Breadcrumbmid);
+				this.breadcrumbMid.padding = new RectOffset(10, 10, 0, 0);
+				this.breadcrumbMid.stretchHeight = true;
+				this.breadcrumbMid.alignment = TextAnchor.MiddleCenter;
+
+				this.packagesScrollbar = new VerticalScrollbar(0F, 0F, 0F);
+				this.restoreOffset = NGEditorPrefs.GetFloat(NGPublisherWindow.PackagesScrollbarOffsetKeyPref, -1, true);
+
+				//if (restoreOffset > 0F)
+				//{
+				//	Event	e = EditorGUIUtility.CommandEvent("RestoreOffset");
+				//	e.button = (int)restoreOffset;
+				//	this.SendEvent(new Event(e));
+				//}
+			}
 
 			Package										package = this.database.Packages[this.selectedPackage];
 			Version										version = null;
@@ -942,21 +1365,8 @@ namespace NGPublisher
 				}
 			}
 
-			using (new EditorGUILayout.HorizontalScope(GeneralStyles.Toolbar))
+			using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
 			{
-				if (this.breadcrumbLeft == null)
-				{
-					this.breadcrumbLeft = new GUIStyle(GUI.skin.FindStyle("GUIEditor.BreadcrumbLeftBackground") ?? GUI.skin.FindStyle("guieditor.breadcrumbleft"));
-					this.breadcrumbLeft.padding = new RectOffset(10, 10, 0, 0);
-					this.breadcrumbLeft.stretchHeight = true;
-					this.breadcrumbLeft.alignment = TextAnchor.MiddleCenter;
-
-					this.breadcrumbMid = new GUIStyle(GUI.skin.FindStyle("GUIEditor.BreadcrumbMidBackground") ?? GUI.skin.FindStyle("guieditor.breadcrumbmid"));
-					this.breadcrumbMid.padding = new RectOffset(10, 10, 0, 0);
-					this.breadcrumbMid.stretchHeight = true;
-					this.breadcrumbMid.alignment = TextAnchor.MiddleCenter;
-				}
-
 				string	packageLabel = package.name;
 				Utility.content.text = packageLabel;
 
@@ -1053,7 +1463,7 @@ namespace NGPublisher
 
 				if (version != null)
 				{
-					Utility.content.text = version.status;
+					Utility.content.text = Utility.NicifyVariableName(version.status);
 					r = GUILayoutUtility.GetRect(Utility.content, this.breadcrumbMid);
 
 					using (ColorStyleRestorer.Get(this.breadcrumbMid, Status.GetColor(version.status)))
@@ -1067,7 +1477,7 @@ namespace NGPublisher
 								List<string>	labels = new List<string>(package.versions.Length);
 
 								for (int i = 0, max = package.versions.Length; i < max; ++i)
-									labels.Add(package.versions[i].status);
+									labels.Add(Utility.NicifyVariableName(package.versions[i].status));
 
 								r.position = GUIUtility.GUIToScreenPoint(r.position);
 								r.x += this.breadcrumbMid.padding.left;
@@ -1134,6 +1544,47 @@ namespace NGPublisher
 				}
 
 				GUILayout.FlexibleSpace();
+
+				if (this.database.HasPackages == true)
+				{
+					bool	canSubmit = false;
+
+					for (int i = 0, max = this.database.Packages.Length; i < max; ++i)
+					{
+						package = this.database.Packages[i];
+
+						for (int j = 0, max2 = package.versions.Length; j < max2; ++j)
+						{
+							if (package.versions[j].status == Status.Draft)
+							{
+								canSubmit = true;
+								break;
+							}
+						}
+					}
+
+					if (canSubmit == true && GUILayout.Button("Multi Submit", EditorStyles.toolbarButton) == true)
+						this.mainTab = MainTab.Submit;
+
+					bool	canPublish = false;
+
+					for (int i = 0, max = this.database.Packages.Length; i < max; ++i)
+					{
+						package = this.database.Packages[i];
+
+						for (int j = 0, max2 = package.versions.Length; j < max2; ++j)
+						{
+							if (package.versions[j].status == Status.Pending)
+							{
+								canPublish = true;
+								break;
+							}
+						}
+					}
+
+					if (canPublish == true && GUILayout.Button("Multi Publish", EditorStyles.toolbarButton) == true)
+						this.mainTab = MainTab.Publish;
+				}
 			}
 
 			if (language != null)
@@ -1148,86 +1599,115 @@ namespace NGPublisher
 		{
 			using (LabelWidthRestorer.Get(70F))
 			{
+				GUILayout.Label("Publisher Login", GeneralStyles.Title1);
+
 				this.username = EditorGUILayout.TextField("Username", this.username);
 				this.password = EditorGUILayout.PasswordField("Password", this.password);
-			}
 
-			using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(this.username) == true || string.IsNullOrEmpty(this.password) == true || this.publisherAPI.IsConnecting() == true))
-			{
-				if (GUILayout.Button("Connect") == true)
+				using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(this.username) == true || string.IsNullOrEmpty(this.password) == true || this.publisherAPI.IsConnecting() == true))
 				{
-					this.publisherAPI.Connect(this.username, this.password, (request, result) =>
+					if (GUILayout.Button("Connect") == true)
 					{
-						if (request == null || request.StatusCode != HttpStatusCode.OK)
+						this.publisherAPI.Connect(this.username, this.password, (request, result) =>
 						{
-							Debug.LogError(result);
-							return;
-						}
+							this.Repaint();
 
-						if (result[0] == '{') // Let's consider it is JSON and try to get a response if available.
-						{
-							try
-							{
-								result = Response.MergeErrors(result);
-
-								Response	response = JsonUtility.FromJson<Response>(result);
-
-								if (response.Succeeded == false)
-								{
-									if (response.errors.error != null)
-										Debug.LogError(response.errors.error.Replace("<br>", "\n"));
-									return;
-								}
-							}
-							catch (Exception ex)
+							if (request == null || request.StatusCode != HttpStatusCode.OK)
 							{
 								Debug.LogError(result);
-								Debug.LogException(ex);
+								return;
+							}
+
+							if (result[0] == '{') // Let's consider it is JSON and try to get a response if available.
+							{
+								try
+								{
+									result = Response.MergeErrors(result);
+
+									Response	response = JsonUtility.FromJson<Response>(result);
+
+									if (response.Succeeded == false)
+									{
+										if (response.errors.error != null)
+											Debug.LogError(response.errors.error.Replace("<br>", "\n"));
+										return;
+									}
+								}
+								catch (Exception ex)
+								{
+									Debug.LogError(result);
+									Debug.LogException(ex);
+								}
+							}
+
+							if (Conf.DebugMode == Conf.DebugState.Verbose)
+							{
+								//if (result[0] == '{' || result[0] == '[')
+								//	NGDebug.LogJSON(result);
+								//else
+									Debug.Log(result);
+							}
+
+							if (this.publisherAPI.IsConnected == false)
+							{
+								this.ShowNotification(new GUIContent("Credentials not recognized."));
+								Debug.Log("Credentials not recognized.");
+							}
+						});
+						return;
+					}
+
+					if (this.publisherAPI.IsConnecting() == true)
+					{
+						GUI.Label(GUILayoutUtility.GetLastRect(), GeneralStyles.StatusWheel);
+						this.Repaint();
+					}
+
+					if (this.publisherAPI.WaitingTFACode == true)
+					{
+						this.TFACode = EditorGUILayout.TextField("Code", this.TFACode);
+
+						using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(this.TFACode) == true))
+						{
+							if (GUILayout.Button("Verify") == true)
+							{
+								this.publisherAPI.ValidateTFACode(this.TFACode, (request, result) =>
+								{
+									Debug.Log("Connected!");
+								});
 							}
 						}
-
-						if (Conf.DebugMode == Conf.DebugState.Verbose)
-						{
-							//if (result[0] == '{' || result[0] == '[')
-							//	NGDebug.LogJSON(result);
-							//else
-								Debug.Log(result);
-						}
-
-						if (this.publisherAPI.IsConnected == false)
-						{
-							this.ShowNotification(new GUIContent("Credentials not recognized."));
-							Debug.Log("Credentials not recognized.");
-						}
-					});
-					return;
+					}
 				}
 
-				if (this.publisherAPI.IsConnecting() == true)
+				if (Conf.DebugMode != Conf.DebugState.None)
 				{
-					GUI.Label(GUILayoutUtility.GetLastRect(), GeneralStyles.StatusWheel);
-					this.Repaint();
+					GUILayout.Space(10F);
+
+					if (GUILayout.Button("Connect Via Unity") == true)
+					{
+						this.publisherAPI.ConnectViaUnity((request, result) =>
+						{
+						});
+					}
+
+					GUILayout.Space(10F);
+
+					GUILayout.Label("Cookie Credential", GeneralStyles.Title1);
+					this.kharma_session = EditorGUILayout.TextField("Session", this.kharma_session);
+					this.kharma_token = EditorGUILayout.TextField("Token", this.kharma_token);
+
+					using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(this.kharma_session) == true || string.IsNullOrEmpty(this.kharma_token) == true))
+					{
+						if (GUILayout.Button("Use") == true)
+							this.publisherAPI.Use(this.kharma_session, this.kharma_token, null);
+					}
 				}
 			}
 		}
 
-		private float restoreOffset;
-
 		private void	OnGUIPackages()
 		{
-			if (this.packagesScrollbar == null)
-			{
-				this.packagesScrollbar = new VerticalScrollbar(0F, 0F, 0F);
-				this.restoreOffset = NGEditorPrefs.GetFloat(NGPublisherWindow.PackagesScrollbarOffsetKeyPref, -1, true);
-
-				//if (restoreOffset > 0F)
-				//{
-				//	Event	e = EditorGUIUtility.CommandEvent("RestoreOffset");
-				//	e.button = (int)restoreOffset;
-				//	this.SendEvent(new Event(e));
-				//}
-			}
-
 			GUILayout.Space(5F);
 
 			Rect		r;
@@ -1300,14 +1780,6 @@ namespace NGPublisher
 				this.packagesScrollbar.Offset = this.restoreOffset;
 				this.restoreOffset = -1F;
 			}
-			//if (Event.current.type == EventType.ExecuteCommand)
-			//{
-			//	if (Event.current.commandName == "RestoreOffset")
-			//	{
-			//		this.packagesScrollbar.Offset = Event.current.button;
-			//		Event.current.Use();
-			//	}
-			//}
 
 			r.width -= this.packagesScrollbar.MaxWidth;
 			GUI.BeginGroup(r);
@@ -1493,7 +1965,18 @@ namespace NGPublisher
 			
 			if (hasDraft == false)
 			{
-				bool	isCreatingDraft = this.publisherAPI.IsCreatingDraft(package.versions[0].id);
+				Version	publishedVersion = null;
+
+				for (int i = 0, max = package.versions.Length; i < max; ++i)
+				{
+					if (package.versions[i].status == Status.Published)
+					{
+						publishedVersion = package.versions[i];
+						break;
+					}
+				}
+
+				bool	isCreatingDraft = publishedVersion != null && this.publisherAPI.IsCreatingDraft(publishedVersion.id);
 				Rect	r4 = r3;
 
 				r4.x += r4.width;
@@ -1505,10 +1988,13 @@ namespace NGPublisher
 				{
 					if (GUI.Button(r4, "Create Draft", EditorStyles.miniButton) == true)
 					{
-						package.versions[0].RequestCreateDraft(this.publisherAPI, response =>
+						publishedVersion.RequestCreateDraft(this.publisherAPI, response =>
 						{
 							if (this.CheckRequestResponse(response) == true)
+							{
 								this.displayStatus |= Statuses.Draft;
+								XGUIHighlightManager.Highlight(publishedVersion.name);
+							}
 							this.Repaint();
 						});
 						return;
@@ -1599,6 +2085,8 @@ namespace NGPublisher
 			r.y += 6F;
 			r.height = 24F;
 			this.Box(r, GUIContent.none);
+			if (version.status == Status.Draft)
+				XGUIHighlightManager.DrawHighlight(version.name, this, r, XGUIHighlights.Glow);
 			r.y += 4F;
 
 			Rect	rStatus = r;
@@ -1647,9 +2135,9 @@ namespace NGPublisher
 			rApply.x -= 50F + 4F;
 			rApply.width = 50F;
 
-			var version_name = this.Edit(r, version.id.GetHashCode() + "version_name".GetHashCode(), version.version_name);
+			var	version_name = this.Edit(r, version.id + "version_name".GetHashCode(), version.version_name);
 			r.x += r.width + 10F;
-			var price = this.Edit(r, version.id.GetHashCode() + "price".GetHashCode(), version.price);
+			var	price = this.Edit(r, version.id + "price".GetHashCode(), version.price);
 
 			using (LabelWidthRestorer.Get(13F))
 			{
@@ -1659,7 +2147,6 @@ namespace NGPublisher
 					Utility.content.tooltip = "Version name";
 					{
 						this.Box(version_name.Rect, GUIContent.none);
-						//EditorGUI.DrawRect(version_name.Rect, GUI.skin.box.onNormal);
 						version_name.EndWithOutput = EditorGUI.TextField(version_name.Rect, Utility.content, version_name.BeginWithInput);
 					}
 
@@ -1741,10 +2228,79 @@ namespace NGPublisher
 			bool	isDeletingDraft = version.status == Status.Draft && this.publisherAPI.IsDeletingingDraft(version.id);
 			Event	currentEvent = Event.current;
 
+			if (version.detailed == null && isGettingVersion == false)
+			{
+				this.database.RequestGetPackageVersion(this.publisherAPI, version, this.HandleErrorOnly);
+				isGettingVersion = true;
+			}
+
 			if (currentEvent.type != EventType.Repaint && currentEvent.type != EventType.Layout)
 			{
 				if (currentEvent.keyCode == KeyCode.LeftAlt)
 					this.Repaint();
+				else if (currentEvent.type == EventType.KeyDown)
+				{
+					if (currentEvent.control == true)
+					{
+						if (currentEvent.keyCode == KeyCode.LeftArrow)
+						{
+							if (this.selectedPackage > 0)
+							{
+								--this.selectedPackage;
+
+								Package	newPackage = this.database.Packages[this.selectedPackage];
+
+								for (int i = 0, max = newPackage.versions.Length; i < max; ++i)
+								{
+									Version	element = newPackage.versions[i];
+
+									if (version.status == element.status)
+									{
+										this.selectedVersion = i;
+										break;
+									}
+								}
+
+								this.Repaint();
+							}
+						}
+						else if (currentEvent.keyCode == KeyCode.RightArrow)
+						{
+							if (this.selectedPackage + 1 < this.database.Packages.Length)
+							{
+								++this.selectedPackage;
+
+								Package	newPackage = this.database.Packages[this.selectedPackage];
+
+								for (int i = 0, max = newPackage.versions.Length; i < max; ++i)
+								{
+									Version	element = newPackage.versions[i];
+
+									if (version.status == element.status)
+									{
+										this.selectedVersion = i;
+										break;
+									}
+								}
+
+								this.Repaint();
+							}
+						}
+					}
+					else if (currentEvent.shift == true)
+					{
+						if (currentEvent.keyCode == KeyCode.LeftArrow)
+						{
+							this.selectedVersion = Mathf.Clamp(this.selectedVersion - 1, 0, this.database.Packages[this.selectedPackage].versions.Length - 1);
+							this.Repaint();
+						}
+						else if (currentEvent.keyCode == KeyCode.RightArrow)
+						{
+							this.selectedVersion = Mathf.Clamp(this.selectedVersion + 1, 0, this.database.Packages[this.selectedPackage].versions.Length - 1);
+							this.Repaint();
+						}
+					}
+				}
 			}
 
 			using (var scroll = new EditorGUILayout.ScrollViewScope(this.versionScrollPosition))
@@ -1763,19 +2319,90 @@ namespace NGPublisher
 							this.Repaint();
 						}
 						else
-							Utility.content.image = NGPublisherWindow.LoopIcon;
+							Utility.content.image = UtilityResources.Refresh;
 
 						if (GUILayout.Button(Utility.content, GUILayoutOptionPool.Height(Constants.SingleLineHeight)) == true || (version.detailed == null && isGettingVersion == false && Event.current.type != EventType.Layout))
 						{
+							Utility.content.image = null;
 							this.database.RequestGetPackageVersion(this.publisherAPI, version, this.HandleErrorOnly);
 							return;
 						}
+
 						Utility.content.image = null;
 
 						GUILayout.FlexibleSpace();
 
-						if (version.status == Status.Draft)
+						if (version.status == Status.Published)
 						{
+							bool	isCreatingDraft = this.publisherAPI.IsCreatingDraft(version.id);
+
+							using (new EditorGUI.DisabledScope(isCreatingDraft))
+							{
+								if (GUILayout.Button("Create Draft") == true)
+								{
+									version.RequestCreateDraft(this.publisherAPI, response =>
+									{
+										if (this.CheckRequestResponse(response) == true)
+										{
+											XGUIHighlightManager.Highlight(version.name);
+
+											Package	package = version.package;
+
+											for (int i = 0, max = package.versions.Length; i < max; ++i)
+											{
+												if (package.versions[i].status == Status.Draft)
+												{
+													this.selectedVersion = i;
+													break;
+												}
+											}
+										}
+										this.Repaint();
+									});
+									return;
+								}
+
+								if (isCreatingDraft == true)
+								{
+									GUI.Label(GUILayoutUtility.GetLastRect(), GeneralStyles.StatusWheel);
+									this.Repaint();
+								}
+							}
+						}
+						else if (version.status == Status.Draft)
+						{
+							bool	isCanSubmitting = this.publisherAPI.IsCanSubmit(version.id) == true || this.publisherAPI.IsSubmitting(version.id) == true;
+
+							using (new EditorGUI.DisabledScope(version.detailed == null || version.detailed.allow_submit == false || isCanSubmitting))
+							{
+								if (GUILayout.Button("Submit") == true && (this.modifiedValues.Count == 0 || EditorUtility.DisplayDialog(NGPublisherWindow.Title, "You modified values and did not validate them.\n\nAre you sure you would like to submit?", "Submit", "Cancel") == true))
+								{
+									version.RequestCanSubmit(this.publisherAPI, response =>
+									{
+										if (this.CheckRequestResponse(response) == true)
+										{
+											SubmissionWindow.Start(version.name, (autoPublish, comments) =>
+											{
+												version.RequestSubmit(this.publisherAPI, autoPublish, comments, submissionResponse =>
+												{
+													if (this.CheckRequestResponse(submissionResponse) == true)
+														this.database.RequestAllPackages(this.publisherAPI, this.HandleErrorOnly);
+												});
+											});
+										}
+
+										this.Repaint();
+									});
+									return;
+								}
+
+								if (isCanSubmitting)
+								{
+									GUI.Label(GUILayoutUtility.GetLastRect(), GeneralStyles.StatusWheel);
+									this.Repaint();
+								}
+							}
+
 							using (new EditorGUI.DisabledScope(isDeletingDraft))
 							{
 								if (GUILayout.Button("Delete Draft") == true && EditorUtility.DisplayDialog(NGPublisherWindow.Title, "Confirm delete draft " + version.name + " (" + version.id + ") ?", "Yes", "No") == true)
@@ -1796,13 +2423,37 @@ namespace NGPublisher
 								}
 							}
 						}
+						else if (version.status == Status.Pending)
+						{
+							bool	isPublishing = this.publisherAPI.IsCreatingDraft(version.id);
+
+							using (new EditorGUI.DisabledScope(isPublishing == true || version.detailed == null || version.detailed.allow_publish == false))
+							{
+								if (GUILayout.Button("Publish") == true && EditorUtility.DisplayDialog(NGPublisherWindow.Title, "Confirm publish draft " + version.name + " (" + version.id + ") ?", "Yes", "No") == true)
+								{
+									version.RequestPublish(this.publisherAPI, string.Empty, response =>
+									{
+										if (this.CheckRequestResponse(response) == true)
+											this.database.RequestAllPackages(this.publisherAPI, this.HandleErrorOnly);
+										this.Repaint();
+									});
+									return;
+								}
+
+								if (isPublishing == true)
+								{
+									GUI.Label(GUILayoutUtility.GetLastRect(), GeneralStyles.StatusWheel);
+									this.Repaint();
+								}
+							}
+						}
 					}
 
 					Rect	rApply = GUILayoutUtility.GetLastRect();
-					var		category_id = this.Edit(version.id.GetHashCode() + "category_id".GetHashCode(), version.category_id);
-					var		version_name = this.Edit(version.id.GetHashCode() + "version_name".GetHashCode(), version.version_name);
-					var		price = this.Edit(version.id.GetHashCode() + "price".GetHashCode(), version.price);
-					var		publishnotes = this.Edit(version.id.GetHashCode() + "publishnotes".GetHashCode(), version.publishnotes);
+					var		category_id = this.Edit(version.id + "category_id".GetHashCode(), version.category_id);
+					var		version_name = this.Edit(version.id + "version_name".GetHashCode(), version.version_name);
+					var		price = this.Edit(version.id + "price".GetHashCode(), version.price);
+					var		publishnotes = this.Edit(version.id + "publishnotes".GetHashCode(), version.publishnotes);
 
 					using (LabelWidthRestorer.Get(100F))
 					{
@@ -2031,6 +2682,47 @@ namespace NGPublisher
 									EditorGUILayout.LabelField("Package Upload");
 								else 
 									EditorGUILayout.LabelField("Package Test Status");
+
+								if (Event.current.alt == true)
+								{
+									if (GUILayout.Button("Auto Set Unity") == true)
+									{
+										foreach (VersionDetailed.Package.Version.UnityPackage unityPackage in version.detailed.package.version.unitypackages)
+										{
+											if (Event.current.control == false && string.IsNullOrEmpty(unityPackage.vetting.unity_versions) == false)
+												continue;
+
+											var					vetting = this.Edit(unityPackage.package_upload_id.GetHashCode() + "vetting".GetHashCode(), unityPackage.vetting);
+											List<Vets.Option>	sortedVersions = new List<Vets.Option>(this.database.Vets.unity_versions);
+
+											sortedVersions.Add(new Vets.Option() { label = unityPackage.unity_version });
+											sortedVersions.Sort((a, b) => this.CompareVersion(a.label, b.label));
+
+											for (int i = 0, max = sortedVersions.Count; i < max; ++i)
+											{
+												if (sortedVersions[i].label == unityPackage.unity_version)
+												{
+													vetting.input.unity_versions = sortedVersions[i + 1].code;
+													break;
+												}
+											}
+
+											version.RequestVetVersion(this.publisherAPI,
+																	  unityPackage,
+																	  vetting.input.platforms.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries),
+																	  vetting.input.unity_versions.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries),
+																	  vetting.input.srp_type.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries),
+																	  vetting.input.dependencies,
+																	  response =>
+																	  {
+																		  if (this.CheckRequestResponse(response) == true)
+																			  unityPackage.vetting = vetting.Apply();
+
+																		  this.Repaint();
+																	  });
+										}
+									}
+								}
 							}
 
 							foreach (VersionDetailed.Package.Version.UnityPackage unityPackage in version.detailed.package.version.unitypackages)
@@ -2327,9 +3019,9 @@ namespace NGPublisher
 
 		private void	OnGUIVersionLanguageMetadata(Version version, VersionDetailed.Package.Version.Language language)
 		{
-			var name = this.Edit(version.id.GetHashCode() + "name".GetHashCode(), language.name);
-			var description = this.Edit(version.id.GetHashCode() + "description".GetHashCode(), language.description);
-			var keywords = this.Edit(version.id.GetHashCode() + "keywords".GetHashCode(), language.keywords);
+			var name = this.Edit(version.id + "name".GetHashCode(), language.name);
+			var description = this.Edit(version.id + "description".GetHashCode(), language.description);
+			var keywords = this.Edit(version.id + "keywords".GetHashCode(), language.keywords);
 
 			using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
 			using (new EditorGUI.DisabledScope(this.publisherAPI.IsSettingPackageMetadata(version.id)))
@@ -2950,6 +3642,84 @@ namespace NGPublisher
 			aev.isLayout = true;
 
 			return aev;
+		}
+
+		private int	CompareVersion(string a, string b)
+		{
+			string[]	aParts = a.Split('.', 'a', 'b', 'f', 'r', 'p', 'x');
+			string[]	bParts = b.Split('.', 'a', 'b', 'f', 'r', 'p', 'x');
+			int			max = aParts.Length > bParts.Length ? bParts.Length : aParts.Length;
+
+			try
+			{
+				if (max != 4)
+				{
+					for (int i = 0; i < max; ++i)
+					{
+						int	aNum = this.ParseInt(aParts[i]);
+						int	bNum = this.ParseInt(bParts[i]);
+
+						if (aNum != bNum)
+							return bNum - aNum;
+					}
+				}
+				else
+				{
+					char	aExt = this.GetVersionExtension(a);
+					char	bExt = this.GetVersionExtension(b);
+
+					// Default Major.Minor.Patch{Ext}Iteration
+					for (int i = 0; i < 3; ++i)
+					{
+						int	aNum = this.ParseInt(aParts[i]);
+						int	bNum = this.ParseInt(bParts[i]);
+
+						if (aNum != bNum)
+							return bNum - aNum;
+					}
+
+					if (aExt != bExt)
+						return bExt - aExt;
+
+					return this.ParseInt(bParts[3]) - this.ParseInt(aParts[3]);
+				}
+			}
+			catch (Exception)
+			{
+				return 0;
+			}
+
+			return b.CompareTo(a);
+		}
+
+		private char	GetVersionExtension(string version)
+		{
+			for (int i = 0, max = NGPublisherWindow.Extensions.Length; i < max; ++i)
+			{
+				int	n = version.IndexOf(NGPublisherWindow.Extensions[i]);
+
+				if (n != -1)
+					return version[n];
+			}
+
+			return (char)0;
+		}
+
+		private int	ParseInt(string input, int i = 0)
+		{
+			int	n = 0;
+
+			for (int max = input.Length; i < max; ++i)
+			{
+				char	c = input[i];
+
+				if (c >= '0' && c <= '9')
+					n = n * 10 + c - '0';
+				else
+					break;
+			}
+
+			return n;
 		}
 
 		protected virtual void	ShowButton(Rect r)

@@ -872,6 +872,99 @@ namespace NGPublisher
 			});
 		}
 
+		public static void	RequestCanSubmit(this Version version, IPublisherAPI api, Action<RequestResponse<string>> onCompleted = null)
+		{
+			api.CanSubmit(version.id, version.version_name, version.publishnotes, version.category_id, version.price, (r, result) =>
+			{
+				RequestResponse<string>	requestResponse = new RequestResponse<string>()
+				{
+					context = version,
+					ok = false,
+					error = null,
+					result = null
+				};
+
+				if (DataStructureExtension.CheckRequest(r, result, requestResponse) == true)
+				{
+					Response	response = DataStructureExtension.CheckResponse(result, requestResponse);
+
+					if (Conf.DebugMode == Conf.DebugState.Verbose)
+						InternalNGDebug.Snapshot(response);
+
+					if (response != null && response.Succeeded == true)
+					{
+						requestResponse.ok = true;
+						requestResponse.result = response.url;
+					}
+				}
+
+				if (onCompleted != null)
+					onCompleted(requestResponse);
+			});
+		}
+
+		public static void	RequestSubmit(this Version version, IPublisherAPI api, bool autoPublish, string comments, Action<RequestResponse<string>> onCompleted = null)
+		{
+			api.Submit(version.id, autoPublish, comments, (r, result) =>
+			{
+				RequestResponse<string>	requestResponse = new RequestResponse<string>()
+				{
+					context = version,
+					ok = false,
+					error = null,
+					result = null
+				};
+
+				if (DataStructureExtension.CheckRequest(r, result, requestResponse) == true)
+				{
+					Response	response = DataStructureExtension.CheckResponse(result, requestResponse);
+
+					if (Conf.DebugMode == Conf.DebugState.Verbose)
+						InternalNGDebug.Snapshot(response);
+
+					if (response != null && response.Succeeded == true)
+					{
+						requestResponse.ok = true;
+						requestResponse.result = response.url;
+					}
+				}
+
+				if (onCompleted != null)
+					onCompleted(requestResponse);
+			});
+		}
+		
+		public static void	RequestPublish(this Version version, IPublisherAPI api, string comments, Action<RequestResponse<string>> onCompleted = null)
+		{
+			api.Publish(version.id, comments, (r, result) =>
+			{
+				RequestResponse<string>	requestResponse = new RequestResponse<string>()
+				{
+					context = version,
+					ok = false,
+					error = null,
+					result = null
+				};
+
+				if (DataStructureExtension.CheckRequest(r, result, requestResponse) == true)
+				{
+					Response	response = DataStructureExtension.CheckResponse(result, requestResponse);
+
+					if (Conf.DebugMode == Conf.DebugState.Verbose)
+						InternalNGDebug.Snapshot(response);
+
+					if (response != null && response.Succeeded == true)
+					{
+						requestResponse.ok = true;
+						requestResponse.result = response.url;
+					}
+				}
+
+				if (onCompleted != null)
+					onCompleted(requestResponse);
+			});
+		}
+
 		public static int	DigestBracketScope(StringBuilder raw, int i, int max = -1)
 		{
 			if (raw[i] == '{')

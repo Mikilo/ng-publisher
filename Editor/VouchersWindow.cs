@@ -1,11 +1,12 @@
-﻿using NGToolsStandalone_For_NGPublisherEditor;
-using System;
+﻿using NGToolsStandalone_For_NGPublisher;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
 namespace NGPublisher
 {
+	using NGToolsStandalone_For_NGPublisherEditor;
+
 	public class VouchersWindow : EditorWindow
 	{
 		public const string	Title = "Vouchers";
@@ -61,14 +62,14 @@ namespace NGPublisher
 				using (new EditorGUILayout.HorizontalScope())
 				{
 					EditorGUI.BeginChangeCheck();
-					this.filterVoucherCode = EditorGUILayout.TextField(this.filterVoucherCode, GeneralStyles.ToolbarSearchTextField, GUILayoutOptionPool.Width(155F));
+					this.filterVoucherCode = EditorGUILayout.TextField(this.filterVoucherCode, UnityStyles.ToolbarSearchTextField, GUILayoutOptionPool.Width(155F));
 					if (EditorGUI.EndChangeCheck() == true)
 					{
 					}
 
 					Rect	r = GUILayoutUtility.GetLastRect();
 
-					if (GUILayout.Button("", GeneralStyles.ToolbarSearchCancelButton, GUILayoutOptionPool.Width(16F)) == true)
+					if (GUILayout.Button("", UnityStyles.ToolbarSearchCancelButton, GUILayoutOptionPool.Width(16F)) == true)
 					{
 						this.filterVoucherCode = string.Empty;
 						GUI.FocusControl(null);
@@ -121,7 +122,7 @@ namespace NGPublisher
 					Voucher	voucher = this.vouchers[i];
 
 					if (string.IsNullOrEmpty(this.filterVoucherCode) == false &&
-						voucher.voucherCode.IndexOf(this.filterVoucherCode, StringComparison.OrdinalIgnoreCase) == -1)
+						voucher.voucherCode.FastContainsInsensitive(this.filterVoucherCode) == false)
 					{
 						continue;
 					}

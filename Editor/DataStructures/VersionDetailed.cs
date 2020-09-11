@@ -196,9 +196,9 @@ namespace NGPublisher
 			//public string	management_flags; // Unused
 		}
 
+		public bool		allow_submit;
+		public bool		allow_publish;
 		public Package	package;
-		//public string	allow_submit; // Unused
-		//public string	allow_publish; // Unused
 		//public int	terms_current; // Unused
 		//public int	terms_accepted; // Unused
 		//public string	draft; // Unused

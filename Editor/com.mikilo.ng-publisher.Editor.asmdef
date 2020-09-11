@@ -1,6 +1,7 @@
 {
     "name": "com.mikilo.ng-publisher.Editor",
     "references": [],
+    "optionalUnityReferences": [],
     "includePlatforms": [
         "Editor"
     ],
@@ -12,7 +13,5 @@
         "NGCoreStandalone_for_NGPublisherEditor.dll"
     ],
     "autoReferenced": true,
-    "defineConstraints": [],
-    "versionDefines": [],
-    "noEngineReferences": false
+    "defineConstraints": []
 }
